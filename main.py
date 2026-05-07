@@ -1,5 +1,5 @@
 # main.py
-# 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版（最终版）
+# 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版（最终统一版）
 
 import os
 import re
@@ -21,17 +21,36 @@ DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 PADDLEOCR_API_URL = "https://7ez8g52bxbp3t2m2.aistudio-app.com/layout-parsing"
 PADDLEOCR_TOKEN = "9dcb8c9a6b87fb01d65549e9d7f8619299ec53a4"
 
-MICRO_KEYWORDS = ["网商", "微众", "亿联", "金城", "裕民", "海峡", "振兴", "新网", "苏商", "中关村", "富民", "锡商", "百信", "长安", "兰州", "威海", "众邦", "蓝海", "华通", "华瑞", "友利", "美团", "度小满", "京东", "蚂蚁", "小米", "苏宁", "平安普惠", "中融", "招联", "哈银", "长银", "中原", "锦程", "苏银凯基", "南银法巴", "北银", "阳光", "新网", "众邦", "华通", "富民", "锡商", "亿联", "金城", "裕民", "中关村", "蓝海", "华瑞", "友利", "三快", "财付通", "小雨点", "消费金融"]
+# 小网贷关键词（包含名称中含"银行"的小贷机构）
+MICRO_KEYWORDS = [
+    "网商", "微众", "亿联", "金城", "裕民", "海峡", "振兴", "新网",
+    "苏商", "中关村", "富民", "锡商", "百信", "长安", "兰州",
+    "威海", "众邦", "蓝海", "华通", "华瑞", "友利", "美团", "度小满",
+    "京东", "蚂蚁", "小米", "苏宁", "平安普惠", "中融", "招联", "哈银",
+    "长银", "中原", "锦程", "苏银凯基", "南银法巴", "北银", "阳光",
+    "三快", "财付通", "小雨点", "消费金融", "海峡银行", "中关村银行",
+    "锡商银行", "华瑞银行", "友利银行", "蓝海银行", "众邦银行"
+]
+
 HOUSING_KEYWORDS = ["个人住房", "住房贷款", "商用房", "公积金", "住房公积金"]
 CAR_KEYWORDS = ["汽车", "车贷"]
-BANK_KEYWORDS = ["工商银行", "农业银行", "中国银行", "建设银行", "交通银行", "招商银行", "浦发银行", "中信银行", "光大银行", "华夏银行", "民生银行", "广发银行", "平安银行", "兴业银行", "浙商银行", "邮储银行", "北京银行", "上海银行", "江苏银行", "宁波银行", "南京银行", "杭州银行", "南昌农村商业银行", "江西万载农村商业银行"]
+
+# 传统大银行（不是小网贷）
+BANK_KEYWORDS = [
+    "工商银行", "农业银行", "中国银行", "建设银行", "交通银行",
+    "招商银行", "浦发银行", "中信银行", "光大银行", "华夏银行",
+    "民生银行", "广发银行", "平安银行", "兴业银行", "浙商银行",
+    "邮储银行", "北京银行", "上海银行", "江苏银行", "宁波银行",
+    "南京银行", "杭州银行", "南昌农村商业银行", "江西万载农村商业银行"
+]
 
 
 def clean_number(num_str: str) -> float:
     if not num_str:
         return 0.0
     try:
-        return float(re.sub(r'[^\d.-]', '', str(num_str).replace(' ', '').replace('，', '').replace(',', '')))
+        cleaned = re.sub(r'[^\d.-]', '', str(num_str).replace(' ', '').replace('，', '').replace(',', ''))
+        return float(cleaned) if cleaned else 0.0
     except:
         return 0.0
 
@@ -88,11 +107,18 @@ def extract_report_date(text: str) -> datetime:
 
 
 def is_micro_institution(institution_name: str) -> bool:
+    """判断是否为小网贷机构"""
+    # 1. 传统大银行不是小网贷
     if any(bk in institution_name for bk in BANK_KEYWORDS):
         return False
+    # 2. 包含小网贷关键词的是小网贷
     if any(kw in institution_name for kw in MICRO_KEYWORDS):
         return True
-    return "银行" not in institution_name
+    # 3. 名称中不含"银行"的是小网贷
+    if "银行" not in institution_name:
+        return True
+    # 4. 其他情况不是
+    return False
 
 
 def extract_asset_disposal(text: str) -> Tuple[int, float]:
@@ -121,11 +147,13 @@ def extract_public_records(text: str) -> str:
     
     judgment_amounts = re.findall(r'诉讼标的金额[：:]\s*([\d,]+)', text)
     if judgment_amounts:
-        records.append(f"民事判决{len(judgment_amounts)}件，金额{sum(clean_number(a) for a in judgment_amounts)/10000:.2f}万元")
+        total = sum(clean_number(a) for a in judgment_amounts)
+        records.append(f"民事判决{len(judgment_amounts)}件，金额{total/10000:.2f}万元")
     
     enforcement_amounts = re.findall(r'申请执行标的金额[：:]\s*([\d,]+)', text)
     if enforcement_amounts:
-        records.append(f"强制执行{len(enforcement_amounts)}件，金额{sum(clean_number(a) for a in enforcement_amounts)/10000:.2f}万元")
+        total = sum(clean_number(a) for a in enforcement_amounts)
+        records.append(f"强制执行{len(enforcement_amounts)}件，金额{total/10000:.2f}万元")
     
     penalty_match = re.search(r'处罚金额[：:]\s*([\d,]+)', text)
     if penalty_match:
@@ -134,7 +162,7 @@ def extract_public_records(text: str) -> str:
 
 
 def extract_loans_from_text(text: str) -> Dict[str, Any]:
-    """按机构去重统计贷款，排除信用卡"""
+    """提取贷款信息，按机构去重，余额=0也计入"""
     institutions = {}
     
     for line in text.split('\n'):
@@ -142,18 +170,17 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
         if not line or not re.match(r'^\d+\.', line):
             continue
         
-        # 排除信用卡
+        # 排除信用卡行
         if "信用卡" in line or "贷记卡" in line:
             continue
         
         if "发放" not in line and "授信" not in line:
             continue
         
-        # 跳过已结清、已转出、销户的账户
+        # 跳过已结清、已转出、销户
         if "已结清" in line or "已转出" in line or "销户" in line:
             continue
         
-        # 提取余额
         balance_match = re.search(r'余额[为]?\s*([\d,]+)', line)
         balance = clean_number(balance_match.group(1)) if balance_match else 0
         
@@ -167,7 +194,7 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
         if not institution:
             continue
         
-        # 判断贷款类型
+        # 判断类型
         is_housing = any(kw in line for kw in HOUSING_KEYWORDS)
         is_car = any(kw in line for kw in CAR_KEYWORDS)
         is_micro = is_micro_institution(institution) and not is_housing and not is_car
@@ -222,7 +249,7 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
 
 
 def extract_credits_from_text(text: str) -> Dict[str, Any]:
-    """提取信用卡信息，识别所有包含信用额度的行"""
+    """提取信用卡信息，只要有余额显示就计入"""
     credits = {"count": 0, "limit": 0.0, "used": 0.0, "overdue": 0, "abnormal": {"stop_payment": 0, "frozen": 0, "doubtful": 0}}
     
     for line in text.split('\n'):
@@ -230,17 +257,17 @@ def extract_credits_from_text(text: str) -> Dict[str, Any]:
         if not line or not re.match(r'^\d+\.', line):
             continue
         
-        # 排除贷款（包含"发放"或"授信"但不含"信用卡"的）
-        if ("发放" in line or "授信" in line) and "信用卡" not in line and "贷记卡" not in line:
-            continue
-        
         # 必须包含信用额度
         limit_match = re.search(r'信用额度\s*([\d,]+)', line) or re.search(r'授信额度\s*([\d,]+)', line)
         if not limit_match:
             continue
         
-        # 排除尚未激活、销户
-        if "尚未激活" in line or "销户" in line:
+        # 排除贷款（包含"发放"或"授信"且不含"贷记卡"）
+        if ("发放" in line or "授信" in line) and "贷记卡" not in line:
+            continue
+        
+        # 排除销户，但包含尚未激活的信用卡（余额0也要计入）
+        if "销户" in line:
             continue
         
         limit = clean_number(limit_match.group(1))
@@ -283,7 +310,8 @@ def extract_guarantee_from_text(text: str) -> Tuple[int, float]:
         count += 1
         amount = clean_number(amount_str)
         loan_balance = clean_number(balance_str)
-        balance += (min(amount, loan_balance) if amount > 0 and loan_balance > 0 else amount) / 10000
+        balance += min(amount, loan_balance) / 10000 if amount > 0 and loan_balance > 0 else amount / 10000
+    # 处理金额为"--"的情况
     if count == 0:
         for amount_str in re.findall(r'相关还款责任金额[为]?\s*([\d,]+)', text):
             if amount_str and amount_str != '--':
@@ -293,21 +321,35 @@ def extract_guarantee_from_text(text: str) -> Tuple[int, float]:
 
 
 def extract_queries_from_html(text: str, report_date: datetime) -> Dict[str, int]:
-    """从 HTML 表格中提取查询记录"""
+    """从 HTML 表格中提取查询记录，支持多种查询原因"""
     queries = {"30d": 0, "31_90d": 0, "91_180d": 0, "181_360d": 0, "micro_60d": 0, "self_60d": 0}
     
-    # 机构查询
-    inst_pattern = r'<td style=\'text-align: center; word-wrap: break-word;\'>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td style=\'text-align: center; word-wrap: break-word;\'>([^<]+)</td>\s*<td style=\'text-align: center; word-wrap: break-word;\'>(贷款审批|信用卡审批|资信审查|担保资格审查|保前审查)</td>'
-    for match in re.finditer(inst_pattern, text):
-        date_str, institution, reason = match.group(1), match.group(2).strip(), match.group(3)
+    # 支持的查询原因（排除贷后管理）
+    valid_reasons = ["贷款审批", "信用卡审批", "资信审查", "担保资格审查", "保前审查", "法人代表"]
+    
+    # 机构查询 - 匹配 HTML 表格中的行
+    # 格式: <td>日期</td><td>机构</td><td>原因</td>
+    pattern = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
+    
+    for match in re.finditer(pattern, text):
+        date_str, institution, reason = match.group(1), match.group(2).strip(), match.group(3).strip()
+        
+        # 排除贷后管理
         if "贷后" in reason:
             continue
+        
+        # 检查是否是有效查询原因
+        is_valid = any(vr in reason for vr in valid_reasons)
+        if not is_valid:
+            continue
+        
         try:
             date_match = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', date_str)
             if date_match:
                 y, m, d = int(date_match.group(1)), int(date_match.group(2)), int(date_match.group(3))
                 query_date = datetime(y, m, d)
                 diff_days = (report_date - query_date).days
+                
                 if 0 <= diff_days <= 360:
                     if diff_days <= 30:
                         queries["30d"] += 1
@@ -317,13 +359,14 @@ def extract_queries_from_html(text: str, report_date: datetime) -> Dict[str, int
                         queries["91_180d"] += 1
                     else:
                         queries["181_360d"] += 1
+                    
                     if diff_days <= 60 and is_micro_institution(institution):
                         queries["micro_60d"] += 1
         except:
             pass
     
     # 本人查询
-    self_pattern = r'<td style=\'text-align: center; word-wrap: break-word;\'>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td style=\'text-align: center; word-wrap: break-word;\'>本人</td>'
+    self_pattern = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
     for match in re.finditer(self_pattern, text):
         date_str = match.group(1)
         try:
@@ -417,7 +460,7 @@ async def analyze(file: UploadFile):
         
         stats = {"gender": gender, "age": age, "marriage": marriage, "queries": queries, "loans": loans, "credits": credits, "overdue": overdue}
         
-        # 构建报告（去除多余空行）
+        # 构建报告
         report_parts = []
         report_parts.append("### 第一部分：简要汇总")
         report_parts.append("")
@@ -481,7 +524,6 @@ async def analyze(file: UploadFile):
             report_parts.append("*公共记录")
             report_parts.append(public_records)
         
-        # 生成第二部分
         part2 = call_deepseek(build_llm_prompt(stats))
         
         full_report = "\n".join(report_parts) + "\n\n### 第二部分：展开分析\n\n" + part2
@@ -494,7 +536,7 @@ async def analyze(file: UploadFile):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "paddleocr_v10_final"}
+    return {"status": "ok", "version": "paddleocr_v12_final"}
 
 
 @app.get("/")
