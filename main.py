@@ -1,5 +1,5 @@
 # main.py
-# 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版（最终修复版）
+# 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版（最终版）
 
 import os
 import re
@@ -21,7 +21,7 @@ DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 PADDLEOCR_API_URL = "https://7ez8g52bxbp3t2m2.aistudio-app.com/layout-parsing"
 PADDLEOCR_TOKEN = "9dcb8c9a6b87fb01d65549e9d7f8619299ec53a4"
 
-MICRO_KEYWORDS = ["网商", "微众", "亿联", "金城", "裕民", "海峡", "振兴", "新网", "苏商", "中关村", "富民", "锡商", "百信", "长安", "兰州", "威海", "众邦", "蓝海", "华通", "华瑞", "友利", "美团", "度小满", "京东", "蚂蚁", "小米", "苏宁", "平安普惠", "中融", "招联", "哈银", "长银", "中原", "锦程", "苏银凯基", "南银法巴", "北银", "阳光", "新网", "众邦", "华通", "富民", "锡商", "亿联", "金城", "裕民", "中关村", "蓝海", "华瑞", "友利", "三快", "财付通", "小雨点"]
+MICRO_KEYWORDS = ["网商", "微众", "亿联", "金城", "裕民", "海峡", "振兴", "新网", "苏商", "中关村", "富民", "锡商", "百信", "长安", "兰州", "威海", "众邦", "蓝海", "华通", "华瑞", "友利", "美团", "度小满", "京东", "蚂蚁", "小米", "苏宁", "平安普惠", "中融", "招联", "哈银", "长银", "中原", "锦程", "苏银凯基", "南银法巴", "北银", "阳光", "新网", "众邦", "华通", "富民", "锡商", "亿联", "金城", "裕民", "中关村", "蓝海", "华瑞", "友利", "三快", "财付通", "小雨点", "消费金融"]
 HOUSING_KEYWORDS = ["个人住房", "住房贷款", "商用房", "公积金", "住房公积金"]
 CAR_KEYWORDS = ["汽车", "车贷"]
 BANK_KEYWORDS = ["工商银行", "农业银行", "中国银行", "建设银行", "交通银行", "招商银行", "浦发银行", "中信银行", "光大银行", "华夏银行", "民生银行", "广发银行", "平安银行", "兴业银行", "浙商银行", "邮储银行", "北京银行", "上海银行", "江苏银行", "宁波银行", "南京银行", "杭州银行", "南昌农村商业银行", "江西万载农村商业银行"]
@@ -37,7 +37,6 @@ def clean_number(num_str: str) -> float:
 
 
 def parse_pdf_with_paddleocr(pdf_bytes: bytes) -> str:
-    """调用 PaddleOCR API 解析 PDF，返回 Markdown 文本"""
     file_data = base64.b64encode(pdf_bytes).decode("ascii")
     headers = {"Authorization": f"token {PADDLEOCR_TOKEN}", "Content-Type": "application/json"}
     payload = {"file": file_data, "fileType": 0, "useLayoutDetection": True}
@@ -108,30 +107,26 @@ def extract_advance_payment(text: str) -> Tuple[int, float]:
 
 def extract_overdue(text: str) -> Dict[str, int]:
     overdue = {"total_months": 0, "90d_count": 0}
-    # 总逾期月数：累加所有 "最近5年内有X个月处于逾期状态"
     for m in re.findall(r'最近\s*5\s*年内有\s*(\d+)\s*个月处于逾期状态', text):
         overdue["total_months"] += int(m)
-    # 90天以上账户数：统计有多少个账户包含 "其中X个月逾期超过90天"（每个账户计1）
-    # 正确值应该是出现次数，而不是累加月份数
     overdue["90d_count"] = len(re.findall(r'其中\s*\d+\s*个月逾期超过\s*90\s*天', text))
     return overdue
 
 
 def extract_public_records(text: str) -> str:
     records = []
-    # 欠税
     tax_match = re.search(r'欠税总额[：:]\s*([\d,]+)', text)
     if tax_match:
         records.append(f"欠税1条，金额{clean_number(tax_match.group(1))/10000:.2f}万元")
-    # 民事判决 - 诉讼标的金额
+    
     judgment_amounts = re.findall(r'诉讼标的金额[：:]\s*([\d,]+)', text)
     if judgment_amounts:
         records.append(f"民事判决{len(judgment_amounts)}件，金额{sum(clean_number(a) for a in judgment_amounts)/10000:.2f}万元")
-    # 强制执行 - 申请执行标的金额
+    
     enforcement_amounts = re.findall(r'申请执行标的金额[：:]\s*([\d,]+)', text)
     if enforcement_amounts:
         records.append(f"强制执行{len(enforcement_amounts)}件，金额{sum(clean_number(a) for a in enforcement_amounts)/10000:.2f}万元")
-    # 行政处罚
+    
     penalty_match = re.search(r'处罚金额[：:]\s*([\d,]+)', text)
     if penalty_match:
         records.append(f"行政处罚1条，金额{clean_number(penalty_match.group(1))/10000:.2f}万元")
@@ -139,8 +134,8 @@ def extract_public_records(text: str) -> str:
 
 
 def extract_loans_from_text(text: str) -> Dict[str, Any]:
-    """只统计余额 > 0 的贷款账户"""
-    loans = {"count": 0, "balance": 0.0, "housing_count": 0, "housing_balance": 0.0, "car_count": 0, "car_balance": 0.0, "micro_count": 0, "micro_balance": 0.0, "overdue_count": 0}
+    """按机构去重统计贷款，余额累加"""
+    institutions = {}  # {机构名: {"balance": 0, "type": "", "overdue": False}}
     
     for line in text.split('\n'):
         line = line.strip()
@@ -154,32 +149,64 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
         balance_match = re.search(r'余额[为]?\s*([\d,]+)', line)
         balance = clean_number(balance_match.group(1)) if balance_match else 0
         
-        # 只统计余额 > 0 的账户（按用户选择 B）
-        if balance <= 0:
-            continue
-        
         inst_match = re.search(r'\d{4}\s*年\d{1,2}\s*月\d{1,2}\s*日([^发放授信]+?)(?:发放|为)', line)
         institution = inst_match.group(1).strip() if inst_match else ""
         
-        loans["count"] += 1
-        loans["balance"] += balance / 10000
+        if not institution:
+            continue
         
+        # 判断贷款类型
         is_housing = any(kw in line for kw in HOUSING_KEYWORDS)
         is_car = any(kw in line for kw in CAR_KEYWORDS)
         is_micro = is_micro_institution(institution) and not is_housing and not is_car
         
         if is_housing:
-            loans["housing_count"] += 1
-            loans["housing_balance"] += balance / 10000
+            loan_type = "housing"
         elif is_car:
-            loans["car_count"] += 1
-            loans["car_balance"] += balance / 10000
+            loan_type = "car"
         elif is_micro:
-            loans["micro_count"] += 1
-            loans["micro_balance"] += balance / 10000
+            loan_type = "micro"
+        else:
+            loan_type = "other"
         
+        # 按机构累加余额
+        if institution not in institutions:
+            institutions[institution] = {"balance": 0, "type": loan_type, "overdue": False}
+        
+        institutions[institution]["balance"] += balance
         if "当前有逾期" in line:
+            institutions[institution]["overdue"] = True
+    
+    # 汇总结果
+    loans = {
+        "count": len(institutions),
+        "balance": 0.0,
+        "housing_count": 0,
+        "housing_balance": 0.0,
+        "car_count": 0,
+        "car_balance": 0.0,
+        "micro_count": 0,
+        "micro_balance": 0.0,
+        "overdue_count": 0
+    }
+    
+    for inst, data in institutions.items():
+        balance_yuan = data["balance"] / 10000
+        loans["balance"] += balance_yuan
+        
+        if data["type"] == "housing":
+            loans["housing_count"] += 1
+            loans["housing_balance"] += balance_yuan
+        elif data["type"] == "car":
+            loans["car_count"] += 1
+            loans["car_balance"] += balance_yuan
+        elif data["type"] == "micro":
+            loans["micro_count"] += 1
+            loans["micro_balance"] += balance_yuan
+        
+        if data["overdue"]:
             loans["overdue_count"] += 1
+    
     return loans
 
 
@@ -243,16 +270,12 @@ def extract_guarantee_from_text(text: str) -> Tuple[int, float]:
 
 
 def extract_queries_from_html(text: str, report_date: datetime) -> Dict[str, int]:
-    """从 HTML 表格中提取查询记录"""
     queries = {"30d": 0, "31_90d": 0, "91_180d": 0, "181_360d": 0, "micro_60d": 0, "self_60d": 0}
     
-    # 机构查询 - 从 HTML 表格中提取
-    # 匹配模式：<td>查询日期</td><td>机构</td><td>原因</td>
+    # 机构查询
     inst_pattern = r'<td style=\'text-align: center; word-wrap: break-word;\'>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td style=\'text-align: center; word-wrap: break-word;\'>([^<]+)</td>\s*<td style=\'text-align: center; word-wrap: break-word;\'>(贷款审批|信用卡审批|资信审查|担保资格审查|保前审查)</td>'
-    
     for match in re.finditer(inst_pattern, text):
         date_str, institution, reason = match.group(1), match.group(2).strip(), match.group(3)
-        # 跳过贷后管理
         if "贷后" in reason:
             continue
         try:
@@ -370,7 +393,6 @@ async def analyze(file: UploadFile):
         
         stats = {"gender": gender, "age": age, "marriage": marriage, "queries": queries, "loans": loans, "credits": credits, "overdue": overdue}
         
-        # 构建报告
         report = f"""### 第一部分：简要汇总
 
 *基本信息
@@ -426,7 +448,7 @@ async def analyze(file: UploadFile):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "paddleocr_v4_final"}
+    return {"status": "ok", "version": "paddleocr_v5_final"}
 
 
 @app.get("/")
