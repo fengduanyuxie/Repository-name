@@ -1,5 +1,5 @@
 # main.py
-# 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版（最终统一版）
+# 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版（最终完整版）
 
 import os
 import re
@@ -108,16 +108,12 @@ def extract_report_date(text: str) -> datetime:
 
 def is_micro_institution(institution_name: str) -> bool:
     """判断是否为小网贷机构"""
-    # 1. 传统大银行不是小网贷
     if any(bk in institution_name for bk in BANK_KEYWORDS):
         return False
-    # 2. 包含小网贷关键词的是小网贷
     if any(kw in institution_name for kw in MICRO_KEYWORDS):
         return True
-    # 3. 名称中不含"银行"的是小网贷
     if "银行" not in institution_name:
         return True
-    # 4. 其他情况不是
     return False
 
 
@@ -249,7 +245,7 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
 
 
 def extract_credits_from_text(text: str) -> Dict[str, Any]:
-    """提取信用卡信息，只要有余额显示就计入"""
+    """提取信用卡信息，不包括尚未激活的"""
     credits = {"count": 0, "limit": 0.0, "used": 0.0, "overdue": 0, "abnormal": {"stop_payment": 0, "frozen": 0, "doubtful": 0}}
     
     for line in text.split('\n'):
@@ -257,17 +253,21 @@ def extract_credits_from_text(text: str) -> Dict[str, Any]:
         if not line or not re.match(r'^\d+\.', line):
             continue
         
+        # 排除贷款
+        if "发放" in line or "授信" in line:
+            continue
+        
         # 必须包含信用额度
         limit_match = re.search(r'信用额度\s*([\d,]+)', line) or re.search(r'授信额度\s*([\d,]+)', line)
         if not limit_match:
             continue
         
-        # 排除贷款（包含"发放"或"授信"且不含"贷记卡"）
-        if ("发放" in line or "授信" in line) and "贷记卡" not in line:
+        # 排除销户
+        if "销户" in line:
             continue
         
-        # 排除销户，但包含尚未激活的信用卡（余额0也要计入）
-        if "销户" in line:
+        # 排除尚未激活的信用卡
+        if "尚未激活" in line:
             continue
         
         limit = clean_number(limit_match.group(1))
@@ -304,41 +304,50 @@ def extract_credits_from_text(text: str) -> Dict[str, Any]:
 
 
 def extract_guarantee_from_text(text: str) -> Tuple[int, float]:
+    """提取担保信息，正确处理金额为"--"的情况"""
     count = 0
     balance = 0.0
-    for amount_str, balance_str in re.findall(r'相关还款责任金额[为]?\s*([\d,]+).*?余额[为]?\s*([\d,]+)', text, re.DOTALL):
-        count += 1
-        amount = clean_number(amount_str)
+    
+    # 匹配相关还款责任金额和余额
+    pattern = r'相关还款责任金额[为]?\s*([\d,]+|--).*?余额[为]?\s*([\d,]+)'
+    for amount_str, balance_str in re.findall(pattern, text, re.DOTALL):
         loan_balance = clean_number(balance_str)
-        balance += min(amount, loan_balance) / 10000 if amount > 0 and loan_balance > 0 else amount / 10000
-    # 处理金额为"--"的情况
+        if amount_str == '--':
+            # 责任金额为"--"，只取余额
+            if loan_balance > 0:
+                count += 1
+                balance += loan_balance / 10000
+        else:
+            amount = clean_number(amount_str)
+            if amount > 0 or loan_balance > 0:
+                count += 1
+                balance += min(amount, loan_balance) / 10000 if amount > 0 and loan_balance > 0 else amount / 10000
+    
+    # 如果没匹配到，尝试只匹配相关还款责任金额
     if count == 0:
         for amount_str in re.findall(r'相关还款责任金额[为]?\s*([\d,]+)', text):
             if amount_str and amount_str != '--':
                 count += 1
                 balance += clean_number(amount_str) / 10000
+    
     return count, balance
 
 
 def extract_queries_from_html(text: str, report_date: datetime) -> Dict[str, int]:
-    """从 HTML 表格中提取查询记录，支持多种查询原因"""
+    """从 HTML 表格中提取查询记录"""
     queries = {"30d": 0, "31_90d": 0, "91_180d": 0, "181_360d": 0, "micro_60d": 0, "self_60d": 0}
     
-    # 支持的查询原因（排除贷后管理）
     valid_reasons = ["贷款审批", "信用卡审批", "资信审查", "担保资格审查", "保前审查", "法人代表"]
     
-    # 机构查询 - 匹配 HTML 表格中的行
-    # 格式: <td>日期</td><td>机构</td><td>原因</td>
+    # 机构查询
     pattern = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
     
     for match in re.finditer(pattern, text):
         date_str, institution, reason = match.group(1), match.group(2).strip(), match.group(3).strip()
         
-        # 排除贷后管理
         if "贷后" in reason:
             continue
         
-        # 检查是否是有效查询原因
         is_valid = any(vr in reason for vr in valid_reasons)
         if not is_valid:
             continue
@@ -366,7 +375,7 @@ def extract_queries_from_html(text: str, report_date: datetime) -> Dict[str, int
             pass
     
     # 本人查询
-    self_pattern = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
+    self_pattern = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</table>'
     for match in re.finditer(self_pattern, text):
         date_str = match.group(1)
         try:
@@ -536,7 +545,7 @@ async def analyze(file: UploadFile):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "paddleocr_v12_final"}
+    return {"status": "ok", "version": "paddleocr_final"}
 
 
 @app.get("/")
