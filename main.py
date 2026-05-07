@@ -26,7 +26,7 @@ DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 
 # 超算互联网 OCR 配置
 SCNET_API_KEY = os.environ.get("SCNET_API_KEY", "")
-SCNET_OCR_URL = "https://api.scnet.cn/api/v1/ocr/recognize"
+SCNET_OCR_URL = "https://api.scnet.cn/api/llm/v1/ocr/recognize"
 
 if not SCNET_API_KEY:
     raise Exception("请在环境变量 SCNET_API_KEY 中设置超算互联网 API Key")
@@ -62,57 +62,66 @@ def clean_number(num_str: str) -> float:
 
 def parse_pdf_with_scnet(pdf_bytes: bytes) -> Dict[str, Any]:
     """调用超算互联网 OCR API 解析 PDF"""
-    pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
     
     headers = {
         "Authorization": f"Bearer {SCNET_API_KEY}",
-        "Content-Type": "application/json"
     }
     
-    payload = {
-        "file": pdf_base64,
-        "file_type": "pdf",
-        "ocr_type": "general",
-        "layout_analysis": True
+    files = {
+        'file': ('report.pdf', pdf_bytes, 'application/pdf')
+    }
+    data = {
+        'ocrType': 'GENERAL'
     }
     
-    response = requests.post(SCNET_OCR_URL, json=payload, headers=headers, timeout=120)
+    response = requests.post(SCNET_OCR_URL, headers=headers, files=files, data=data, timeout=120)
     
     if response.status_code != 200:
-        raise Exception(f"超算OCR API错误: {response.status_code}")
+        raise Exception(f"超算OCR API错误: {response.status_code} - {response.text[:200]}")
     
     result = response.json()
     
-    if result.get("code") != 200 and result.get("code") != 0:
-        raise Exception(f"超算OCR业务错误: {result.get('message')}")
+    if result.get("code") != "0" and result.get("code") != 0:
+        raise Exception(f"超算OCR业务错误: {result.get('msg', '未知错误')}")
     
-    data = result.get("data", {})
-    ocr_text = data.get("text", "")
-    paragraphs = data.get("paragraphs", [])
+    data_list = result.get("data", [])
+    if not data_list:
+        raise Exception("OCR返回数据为空")
     
+    all_text = []
     elements = []
-    for idx, para in enumerate(paragraphs):
-        elem = {
-            "type": "NarrativeText",
-            "element_id": f"scnet_{idx}",
-            "text": para.get("text", "")
-        }
-        if para.get("is_table", False):
-            elem["type"] = "Table"
-        elements.append(elem)
+    element_id = 0
     
-    if not elements and ocr_text:
-        lines = ocr_text.split('\n')
-        for idx, line in enumerate(lines):
-            if line.strip():
+    for data_item in data_list:
+        result_list = data_item.get("result", [])
+        for ocr_result in result_list:
+            elements_data = ocr_result.get("elements", {})
+            if ocr_result.get("classifyCode") == "GENERAL":
+                text_list = elements_data.get("text", [])
+                for text_item in text_list:
+                    text_content = text_item.get("text", "")
+                    if text_content:
+                        all_text.append(text_content)
+                        elements.append({
+                            "type": "NarrativeText",
+                            "element_id": f"scnet_{element_id}",
+                            "text": text_content
+                        })
+                        element_id += 1
+            else:
+                text_content = json.dumps(elements_data, ensure_ascii=False)
+                all_text.append(text_content)
                 elements.append({
                     "type": "NarrativeText",
-                    "element_id": f"scnet_{idx}",
-                    "text": line
+                    "element_id": f"scnet_{element_id}",
+                    "text": text_content
                 })
+                element_id += 1
+    
+    markdown = "\n".join(all_text)
     
     return {
-        "markdown": ocr_text,
+        "markdown": markdown,
         "elements": elements,
         "success_count": len(elements)
     }
@@ -646,7 +655,7 @@ async def analyze(file: UploadFile):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "scnet_ocr_v1"}
+    return {"status": "ok", "version": "scnet_ocr_v2"}
 
 
 @app.get("/")
