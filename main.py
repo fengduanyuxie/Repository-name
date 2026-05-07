@@ -1,5 +1,5 @@
-# main.py
-# 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版（正式版）
+# main_debug.py
+# 临时调试版 - 用于查看提取到的机构列表
 
 import os
 import re
@@ -134,21 +134,15 @@ def extract_public_records(text: str) -> str:
 
 
 def extract_loans_from_text(text: str) -> Dict[str, Any]:
-    """按机构去重统计贷款，排除信用卡"""
+    """按机构去重统计贷款，余额=0也计入，余额累加"""
     institutions = {}
     
     for line in text.split('\n'):
         line = line.strip()
         if not line or not re.match(r'^\d+\.', line):
             continue
-        
-        # 排除信用卡（关键修复）
-        if "信用卡" in line or "贷记卡" in line:
-            continue
-        
         if "发放" not in line and "授信" not in line:
             continue
-        
         # 跳过已结清、已转出、销户的账户
         if "已结清" in line or "已转出" in line or "销户" in line:
             continue
@@ -188,6 +182,17 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
         institutions[institution]["balance"] += balance
         if "当前有逾期" in line:
             institutions[institution]["overdue"] = True
+    
+    # ========== 调试输出 ==========
+    print("\n" + "=" * 60)
+    print("【调试】提取到的机构列表（共 {} 家）".format(len(institutions)))
+    print("=" * 60)
+    for idx, (inst, data) in enumerate(institutions.items(), 1):
+        print(f"{idx}. {inst}")
+        print(f"   余额: {data['balance']} 元, 类型: {data['type']}, 逾期: {data['overdue']}")
+    print("=" * 60)
+    print("请将以上机构列表复制发给我")
+    print("=" * 60 + "\n")
     
     # 汇总结果
     loans = {
@@ -460,7 +465,7 @@ async def analyze(file: UploadFile):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "paddleocr_v9_final"}
+    return {"status": "ok", "version": "debug_v1"}
 
 
 @app.get("/")
@@ -470,12 +475,13 @@ def frontend():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>征信报告分析系统</title>
+    <title>征信报告分析系统（调试版）</title>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
         body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background:#f5f7fa;padding:16px}
         .container{max-width:600px;margin:0 auto;background:#fff;border-radius:24px;padding:20px;box-shadow:0 4px 20px rgba(0,0,0,0.08)}
         h1{color:#1e3c72;border-bottom:3px solid #4a90e2;padding-bottom:12px;margin-bottom:16px;font-size:22px}
+        .version-badge{background:#f0ad4e;color:#fff;font-size:12px;padding:2px 8px;border-radius:20px;margin-left:10px}
         .desc{color:#666;font-size:14px;margin-bottom:20px}
         .upload-area{border:2px dashed #4a90e2;border-radius:20px;padding:40px 20px;text-align:center;background:#fafcff;margin:16px 0;cursor:pointer}
         .upload-area:hover{background:#eef4ff;border-color:#357abd}
@@ -493,7 +499,7 @@ def frontend():
 </head>
 <body>
 <div class="container">
-    <h1>📄 征信结构解读</h1>
+    <h1>📄 征信结构解读 <span class="version-badge">调试版</span></h1>
     <p class="desc">上传PDF格式的个人简版信用报告，系统将自动解析并生成专业风控报告。</p>
     <div class="upload-area" id="uploadArea">
         <div class="upload-icon">📎</div>
@@ -504,7 +510,7 @@ def frontend():
     <button id="analyzeBtn" disabled>开始分析</button>
     <div class="loading" id="loading">正在分析，请稍候...</div>
     <div class="result-container" id="resultContainer"><div class="result" id="result"></div></div>
-    <div class="info-note">💡 提示：分析结果包含两部分 — 简要汇总 + 展开分析</div>
+    <div class="info-note">🔧 调试版 - 日志中会输出提取到的机构列表</div>
 </div>
 <script>
     const uploadArea=document.getElementById('uploadArea'),fileInput=document.getElementById('fileInput'),analyzeBtn=document.getElementById('analyzeBtn'),loadingDiv=document.getElementById('loading'),resultDiv=document.getElementById('result'),resultContainer=document.getElementById('resultContainer'),fileNameSpan=document.getElementById('fileName');
