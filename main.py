@@ -1,5 +1,5 @@
-# main_debug.py
-# 临时调试版 - 用于查看提取到的机构列表
+# main.py
+# 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版（最终版）
 
 import os
 import re
@@ -134,15 +134,21 @@ def extract_public_records(text: str) -> str:
 
 
 def extract_loans_from_text(text: str) -> Dict[str, Any]:
-    """按机构去重统计贷款，余额=0也计入，余额累加"""
+    """按机构去重统计贷款，排除信用卡"""
     institutions = {}
     
     for line in text.split('\n'):
         line = line.strip()
         if not line or not re.match(r'^\d+\.', line):
             continue
+        
+        # 排除信用卡
+        if "信用卡" in line or "贷记卡" in line:
+            continue
+        
         if "发放" not in line and "授信" not in line:
             continue
+        
         # 跳过已结清、已转出、销户的账户
         if "已结清" in line or "已转出" in line or "销户" in line:
             continue
@@ -151,7 +157,7 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
         balance_match = re.search(r'余额[为]?\s*([\d,]+)', line)
         balance = clean_number(balance_match.group(1)) if balance_match else 0
         
-        # 提取机构名 - 使用简单可靠的 split 方法
+        # 提取机构名
         institution = ""
         if "日" in line and "发放" in line:
             institution = line.split("日")[1].split("发放")[0].strip()
@@ -175,7 +181,6 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
         else:
             loan_type = "other"
         
-        # 按机构累加
         if institution not in institutions:
             institutions[institution] = {"balance": 0, "type": loan_type, "overdue": False}
         
@@ -183,18 +188,7 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
         if "当前有逾期" in line:
             institutions[institution]["overdue"] = True
     
-    # ========== 调试输出 ==========
-    print("\n" + "=" * 60)
-    print("【调试】提取到的机构列表（共 {} 家）".format(len(institutions)))
-    print("=" * 60)
-    for idx, (inst, data) in enumerate(institutions.items(), 1):
-        print(f"{idx}. {inst}")
-        print(f"   余额: {data['balance']} 元, 类型: {data['type']}, 逾期: {data['overdue']}")
-    print("=" * 60)
-    print("请将以上机构列表复制发给我")
-    print("=" * 60 + "\n")
-    
-    # 汇总结果
+    # 汇总
     loans = {
         "count": len(institutions),
         "balance": 0.0,
@@ -228,26 +222,38 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
 
 
 def extract_credits_from_text(text: str) -> Dict[str, Any]:
+    """提取信用卡信息，识别所有包含信用额度的行"""
     credits = {"count": 0, "limit": 0.0, "used": 0.0, "overdue": 0, "abnormal": {"stop_payment": 0, "frozen": 0, "doubtful": 0}}
     
     for line in text.split('\n'):
         line = line.strip()
-        if not line or not re.match(r'^\d+\.', line) or '贷记卡' not in line:
-            continue
-        if any(x in line for x in ['美元', '尚未激活', '销户']):
+        if not line or not re.match(r'^\d+\.', line):
             continue
         
+        # 排除贷款（包含"发放"或"授信"但不含"信用卡"的）
+        if ("发放" in line or "授信" in line) and "信用卡" not in line and "贷记卡" not in line:
+            continue
+        
+        # 必须包含信用额度
         limit_match = re.search(r'信用额度\s*([\d,]+)', line) or re.search(r'授信额度\s*([\d,]+)', line)
         if not limit_match:
             continue
+        
+        # 排除尚未激活、销户
+        if "尚未激活" in line or "销户" in line:
+            continue
+        
         limit = clean_number(limit_match.group(1))
+        if limit <= 0:
+            continue
+        
+        # 提取已用额度
         used_match = re.search(r'已使用额度\s*([\d,]+)', line) or re.search(r'余额\s*([\d,]+)', line)
         used = clean_number(used_match.group(1)) if used_match else 0
         
-        if limit > 0:
-            credits["count"] += 1
-            credits["limit"] += limit / 10000
-            credits["used"] += used / 10000
+        credits["count"] += 1
+        credits["limit"] += limit / 10000
+        credits["used"] += used / 10000
         
         if "当前有逾期" in line:
             credits["overdue"] += 1
@@ -287,6 +293,7 @@ def extract_guarantee_from_text(text: str) -> Tuple[int, float]:
 
 
 def extract_queries_from_html(text: str, report_date: datetime) -> Dict[str, int]:
+    """从 HTML 表格中提取查询记录"""
     queries = {"30d": 0, "31_90d": 0, "91_180d": 0, "181_360d": 0, "micro_60d": 0, "self_60d": 0}
     
     # 机构查询
@@ -410,54 +417,76 @@ async def analyze(file: UploadFile):
         
         stats = {"gender": gender, "age": age, "marriage": marriage, "queries": queries, "loans": loans, "credits": credits, "overdue": overdue}
         
-        report = f"""### 第一部分：简要汇总
-
-*基本信息
-性别：{gender}
-年龄：{age}
-婚姻：{marriage}
-风险预警：{risk_warning}
-
-*查询记录
-机构
-30天内：{queries['30d']}
-31-90天：{queries['31_90d']}
-90-180天：{queries['91_180d']}
-180-360天：{queries['181_360d']}
-60天内小网贷：{queries['micro_60d']}
-本人
-60天内本人：{queries['self_60d']}
-
-*5年内逾期
-总月数：{overdue['total_months']}
-90天以上的账户数：{overdue['90d_count']}
-
-*贷款
-{f"当逾：{loans['overdue_count']}个" if loans['overdue_count'] else ""}
-机构数：{loans['count']}
-总余额：{round(loans['balance'], 2)}万元
-{f"房贷数：{loans['housing_count']}\n房贷余额：{round(loans['housing_balance'], 2)}万元" if loans['housing_count'] else ""}
-{f"车贷数：{loans['car_count']}\n车贷余额：{round(loans['car_balance'], 2)}万元" if loans['car_count'] else ""}
-小网贷的机构数：{loans['micro_count']}
-小网贷的余额：{round(loans['micro_balance'], 2)}万元
-
-*信用卡
-{f"当逾：{credits['overdue']}个" if credits['overdue'] else ""}
-{f"非正常：{credits['abnormal_display']}" if credits['abnormal_display'] else ""}
-机构数：{credits['count']}
-授信额：{round(credits['limit'], 2)}万元
-已用额度：{round(credits['used'], 2)}万元
-使用率：{credits['usage_rate']}%
-
-{f"*担保信息\n担保户数：{guarantee_count}\n担保余额：{round(guarantee_balance, 2)}万元" if guarantee_count or guarantee_balance else ""}
-
-{f"*公共记录\n{public_records}" if public_records else ""}
-
-### 第二部分：展开分析
-
-{call_deepseek(build_llm_prompt(stats))}"""
+        # 构建报告（去除多余空行）
+        report_parts = []
+        report_parts.append("### 第一部分：简要汇总")
+        report_parts.append("")
+        report_parts.append("*基本信息")
+        report_parts.append(f"性别：{gender}")
+        report_parts.append(f"年龄：{age}")
+        report_parts.append(f"婚姻：{marriage}")
+        report_parts.append(f"风险预警：{risk_warning}")
+        report_parts.append("")
         
-        return JSONResponse({"success": True, "full_report": report})
+        report_parts.append("*查询记录")
+        report_parts.append("机构")
+        report_parts.append(f"30天内：{queries['30d']}")
+        report_parts.append(f"31-90天：{queries['31_90d']}")
+        report_parts.append(f"90-180天：{queries['91_180d']}")
+        report_parts.append(f"180-360天：{queries['181_360d']}")
+        report_parts.append(f"60天内小网贷：{queries['micro_60d']}")
+        report_parts.append("本人")
+        report_parts.append(f"60天内本人：{queries['self_60d']}")
+        report_parts.append("")
+        
+        report_parts.append("*5年内逾期")
+        report_parts.append(f"总月数：{overdue['total_months']}")
+        report_parts.append(f"90天以上的账户数：{overdue['90d_count']}")
+        report_parts.append("")
+        
+        report_parts.append("*贷款")
+        if loans['overdue_count']:
+            report_parts.append(f"当逾：{loans['overdue_count']}个")
+        report_parts.append(f"机构数：{loans['count']}")
+        report_parts.append(f"总余额：{round(loans['balance'], 2)}万元")
+        if loans['housing_count']:
+            report_parts.append(f"房贷数：{loans['housing_count']}")
+            report_parts.append(f"房贷余额：{round(loans['housing_balance'], 2)}万元")
+        if loans['car_count']:
+            report_parts.append(f"车贷数：{loans['car_count']}")
+            report_parts.append(f"车贷余额：{round(loans['car_balance'], 2)}万元")
+        report_parts.append(f"小网贷的机构数：{loans['micro_count']}")
+        report_parts.append(f"小网贷的余额：{round(loans['micro_balance'], 2)}万元")
+        report_parts.append("")
+        
+        report_parts.append("*信用卡")
+        if credits['overdue']:
+            report_parts.append(f"当逾：{credits['overdue']}个")
+        if credits['abnormal_display']:
+            report_parts.append(f"非正常：{credits['abnormal_display']}")
+        if credits['count'] > 0:
+            report_parts.append(f"机构数：{credits['count']}")
+            report_parts.append(f"授信额：{round(credits['limit'], 2)}万元")
+            report_parts.append(f"已用额度：{round(credits['used'], 2)}万元")
+            report_parts.append(f"使用率：{credits['usage_rate']}%")
+        report_parts.append("")
+        
+        if guarantee_count or guarantee_balance:
+            report_parts.append("*担保信息")
+            report_parts.append(f"担保户数：{guarantee_count}")
+            report_parts.append(f"担保余额：{round(guarantee_balance, 2)}万元")
+            report_parts.append("")
+        
+        if public_records:
+            report_parts.append("*公共记录")
+            report_parts.append(public_records)
+        
+        # 生成第二部分
+        part2 = call_deepseek(build_llm_prompt(stats))
+        
+        full_report = "\n".join(report_parts) + "\n\n### 第二部分：展开分析\n\n" + part2
+        
+        return JSONResponse({"success": True, "full_report": full_report})
     except Exception as e:
         print(f"错误: {str(e)}")
         raise HTTPException(500, f"处理失败: {str(e)}")
@@ -465,7 +494,7 @@ async def analyze(file: UploadFile):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "debug_v1"}
+    return {"status": "ok", "version": "paddleocr_v10_final"}
 
 
 @app.get("/")
@@ -475,13 +504,12 @@ def frontend():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>征信报告分析系统（调试版）</title>
+    <title>征信报告分析系统</title>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
         body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background:#f5f7fa;padding:16px}
         .container{max-width:600px;margin:0 auto;background:#fff;border-radius:24px;padding:20px;box-shadow:0 4px 20px rgba(0,0,0,0.08)}
         h1{color:#1e3c72;border-bottom:3px solid #4a90e2;padding-bottom:12px;margin-bottom:16px;font-size:22px}
-        .version-badge{background:#f0ad4e;color:#fff;font-size:12px;padding:2px 8px;border-radius:20px;margin-left:10px}
         .desc{color:#666;font-size:14px;margin-bottom:20px}
         .upload-area{border:2px dashed #4a90e2;border-radius:20px;padding:40px 20px;text-align:center;background:#fafcff;margin:16px 0;cursor:pointer}
         .upload-area:hover{background:#eef4ff;border-color:#357abd}
@@ -499,7 +527,7 @@ def frontend():
 </head>
 <body>
 <div class="container">
-    <h1>📄 征信结构解读 <span class="version-badge">调试版</span></h1>
+    <h1>📄 征信结构解读</h1>
     <p class="desc">上传PDF格式的个人简版信用报告，系统将自动解析并生成专业风控报告。</p>
     <div class="upload-area" id="uploadArea">
         <div class="upload-icon">📎</div>
@@ -510,7 +538,7 @@ def frontend():
     <button id="analyzeBtn" disabled>开始分析</button>
     <div class="loading" id="loading">正在分析，请稍候...</div>
     <div class="result-container" id="resultContainer"><div class="result" id="result"></div></div>
-    <div class="info-note">🔧 调试版 - 日志中会输出提取到的机构列表</div>
+    <div class="info-note">💡 提示：分析结果包含两部分 — 简要汇总 + 展开分析</div>
 </div>
 <script>
     const uploadArea=document.getElementById('uploadArea'),fileInput=document.getElementById('fileInput'),analyzeBtn=document.getElementById('analyzeBtn'),loadingDiv=document.getElementById('loading'),resultDiv=document.getElementById('result'),resultContainer=document.getElementById('resultContainer'),fileNameSpan=document.getElementById('fileName');
