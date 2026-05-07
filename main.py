@@ -1,6 +1,5 @@
 # main.py
 # 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版
-# 替换原 TextIn xParse 版本
 
 import os
 import re
@@ -75,7 +74,7 @@ def parse_pdf_with_paddleocr(pdf_bytes: bytes) -> Dict[str, Any]:
     
     payload = {
         "file": file_data,
-        "fileType": 0,  # 0 表示 PDF 文件
+        "fileType": 0,
         "useDocOrientationClassify": False,
         "useDocUnwarping": False,
         "useChartRecognition": False,
@@ -99,17 +98,22 @@ def parse_pdf_with_paddleocr(pdf_bytes: bytes) -> Dict[str, Any]:
     full_markdown = ""
     layout_results = result.get("result", {}).get("layoutParsingResults", [])
     
-    for res in layout_results:
-        markdown_text = res.get("markdown", {}).get("text", "")
-        if markdown_text:
-            full_markdown += markdown_text + "\n"
+    if layout_results:
+        for res in layout_results:
+            markdown_text = res.get("markdown", {}).get("text", "")
+            if markdown_text:
+                full_markdown += markdown_text + "\n"
+    else:
+        # 兼容直接返回数组的情况
+        if isinstance(result, list):
+            for page in result:
+                if "prunedResult" in page and "markdown" in page["prunedResult"]:
+                    full_markdown += page["prunedResult"]["markdown"].get("text", "") + "\n"
+        elif "markdown" in result and "text" in result.get("markdown", {}):
+            full_markdown = result["markdown"]["text"]
     
     if not full_markdown:
-        # 兼容其他可能的返回格式
-        if "markdown" in result and "text" in result.get("markdown", {}):
-            full_markdown = result["markdown"]["text"]
-        elif "text" in result:
-            full_markdown = result["text"]
+        raise Exception("PaddleOCR 未能提取到文本内容")
     
     print(f"PaddleOCR 解析成功，文本长度: {len(full_markdown)}")
     return {"markdown": full_markdown, "elements": []}
@@ -259,11 +263,9 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
         balance_match = re.search(r'余额[为]?([\d,]+)', line)
         balance = clean_number(balance_match.group(1)) if balance_match else 0
         
-        # 提取机构名称
         inst_match = re.search(r'\d{4}年\d{1,2}月\d{1,2}日([^发放授信]+?)(?:发放|为)', line)
         institution = inst_match.group(1).strip() if inst_match else ''
         
-        # 如果没有匹配到，尝试另一种模式
         if not institution:
             inst_match2 = re.search(r'日([^发放授信]+?)(?:发放|为)', line)
             institution = inst_match2.group(1).strip() if inst_match2 else ''
@@ -786,4 +788,5 @@ def frontend():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
