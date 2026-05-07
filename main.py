@@ -1,5 +1,5 @@
 # main.py
-# 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版（最终完整版）
+# 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版（最终正式版）
 
 import os
 import re
@@ -21,7 +21,6 @@ DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 PADDLEOCR_API_URL = "https://7ez8g52bxbp3t2m2.aistudio-app.com/layout-parsing"
 PADDLEOCR_TOKEN = "9dcb8c9a6b87fb01d65549e9d7f8619299ec53a4"
 
-# 小网贷关键词（包含名称中含"银行"的小贷机构）
 MICRO_KEYWORDS = [
     "网商", "微众", "亿联", "金城", "裕民", "海峡", "振兴", "新网",
     "苏商", "中关村", "富民", "锡商", "百信", "长安", "兰州",
@@ -35,7 +34,6 @@ MICRO_KEYWORDS = [
 HOUSING_KEYWORDS = ["个人住房", "住房贷款", "商用房", "公积金", "住房公积金"]
 CAR_KEYWORDS = ["汽车", "车贷"]
 
-# 传统大银行（不是小网贷）
 BANK_KEYWORDS = [
     "工商银行", "农业银行", "中国银行", "建设银行", "交通银行",
     "招商银行", "浦发银行", "中信银行", "光大银行", "华夏银行",
@@ -107,7 +105,6 @@ def extract_report_date(text: str) -> datetime:
 
 
 def is_micro_institution(institution_name: str) -> bool:
-    """判断是否为小网贷机构"""
     if any(bk in institution_name for bk in BANK_KEYWORDS):
         return False
     if any(kw in institution_name for kw in MICRO_KEYWORDS):
@@ -166,8 +163,8 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
         if not line or not re.match(r'^\d+\.', line):
             continue
         
-        # 排除信用卡行
-        if "信用卡" in line or "贷记卡" in line:
+        # 排除信用卡行（包含"贷记卡"的）
+        if "贷记卡" in line:
             continue
         
         if "发放" not in line and "授信" not in line:
@@ -180,7 +177,6 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
         balance_match = re.search(r'余额[为]?\s*([\d,]+)', line)
         balance = clean_number(balance_match.group(1)) if balance_match else 0
         
-        # 提取机构名
         institution = ""
         if "日" in line and "发放" in line:
             institution = line.split("日")[1].split("发放")[0].strip()
@@ -190,7 +186,6 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
         if not institution:
             continue
         
-        # 判断类型
         is_housing = any(kw in line for kw in HOUSING_KEYWORDS)
         is_car = any(kw in line for kw in CAR_KEYWORDS)
         is_micro = is_micro_institution(institution) and not is_housing and not is_car
@@ -211,7 +206,6 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
         if "当前有逾期" in line:
             institutions[institution]["overdue"] = True
     
-    # 汇总
     loans = {
         "count": len(institutions),
         "balance": 0.0,
@@ -245,7 +239,7 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
 
 
 def extract_credits_from_text(text: str) -> Dict[str, Any]:
-    """提取信用卡信息，不包括尚未激活的"""
+    """提取信用卡信息"""
     credits = {"count": 0, "limit": 0.0, "used": 0.0, "overdue": 0, "abnormal": {"stop_payment": 0, "frozen": 0, "doubtful": 0}}
     
     for line in text.split('\n'):
@@ -253,21 +247,17 @@ def extract_credits_from_text(text: str) -> Dict[str, Any]:
         if not line or not re.match(r'^\d+\.', line):
             continue
         
-        # 排除贷款
-        if "发放" in line or "授信" in line:
-            continue
-        
-        # 必须包含信用额度
-        limit_match = re.search(r'信用额度\s*([\d,]+)', line) or re.search(r'授信额度\s*([\d,]+)', line)
-        if not limit_match:
+        # 必须是贷记卡
+        if "贷记卡" not in line:
             continue
         
         # 排除销户
         if "销户" in line:
             continue
         
-        # 排除尚未激活的信用卡
-        if "尚未激活" in line:
+        # 提取信用额度
+        limit_match = re.search(r'信用额度\s*([\d,]+)', line)
+        if not limit_match:
             continue
         
         limit = clean_number(limit_match.group(1))
@@ -304,16 +294,13 @@ def extract_credits_from_text(text: str) -> Dict[str, Any]:
 
 
 def extract_guarantee_from_text(text: str) -> Tuple[int, float]:
-    """提取担保信息，正确处理金额为"--"的情况"""
     count = 0
     balance = 0.0
     
-    # 匹配相关还款责任金额和余额
     pattern = r'相关还款责任金额[为]?\s*([\d,]+|--).*?余额[为]?\s*([\d,]+)'
     for amount_str, balance_str in re.findall(pattern, text, re.DOTALL):
         loan_balance = clean_number(balance_str)
         if amount_str == '--':
-            # 责任金额为"--"，只取余额
             if loan_balance > 0:
                 count += 1
                 balance += loan_balance / 10000
@@ -323,7 +310,6 @@ def extract_guarantee_from_text(text: str) -> Tuple[int, float]:
                 count += 1
                 balance += min(amount, loan_balance) / 10000 if amount > 0 and loan_balance > 0 else amount / 10000
     
-    # 如果没匹配到，尝试只匹配相关还款责任金额
     if count == 0:
         for amount_str in re.findall(r'相关还款责任金额[为]?\s*([\d,]+)', text):
             if amount_str and amount_str != '--':
@@ -334,13 +320,11 @@ def extract_guarantee_from_text(text: str) -> Tuple[int, float]:
 
 
 def extract_queries_from_html(text: str, report_date: datetime) -> Dict[str, int]:
-    """从 HTML 表格中提取查询记录"""
     queries = {"30d": 0, "31_90d": 0, "91_180d": 0, "181_360d": 0, "micro_60d": 0, "self_60d": 0}
     
     valid_reasons = ["贷款审批", "信用卡审批", "资信审查", "担保资格审查", "保前审查", "法人代表"]
     
-    # 机构查询
-    pattern = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
+    pattern = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</tr>'
     
     for match in re.finditer(pattern, text):
         date_str, institution, reason = match.group(1), match.group(2).strip(), match.group(3).strip()
@@ -374,8 +358,7 @@ def extract_queries_from_html(text: str, report_date: datetime) -> Dict[str, int
         except:
             pass
     
-    # 本人查询
-    self_pattern = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</table>'
+    self_pattern = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)<tr>\s*<td[^>]*>本人</td>'
     for match in re.finditer(self_pattern, text):
         date_str = match.group(1)
         try:
@@ -499,16 +482,21 @@ async def analyze(file: UploadFile):
         report_parts.append("*贷款")
         if loans['overdue_count']:
             report_parts.append(f"当逾：{loans['overdue_count']}个")
-        report_parts.append(f"机构数：{loans['count']}")
-        report_parts.append(f"总余额：{round(loans['balance'], 2)}万元")
-        if loans['housing_count']:
-            report_parts.append(f"房贷数：{loans['housing_count']}")
-            report_parts.append(f"房贷余额：{round(loans['housing_balance'], 2)}万元")
-        if loans['car_count']:
-            report_parts.append(f"车贷数：{loans['car_count']}")
-            report_parts.append(f"车贷余额：{round(loans['car_balance'], 2)}万元")
-        report_parts.append(f"小网贷的机构数：{loans['micro_count']}")
-        report_parts.append(f"小网贷的余额：{round(loans['micro_balance'], 2)}万元")
+        
+        # 检查贷款是否有有效数据（机构数>0 或 总余额>0）
+        if loans['count'] == 0 and loans['balance'] == 0 and loans['housing_count'] == 0 and loans['car_count'] == 0 and loans['micro_count'] == 0:
+            report_parts.append("无")
+        else:
+            report_parts.append(f"机构数：{loans['count']}")
+            report_parts.append(f"总余额：{round(loans['balance'], 2)}万元")
+            if loans['housing_count']:
+                report_parts.append(f"房贷数：{loans['housing_count']}")
+                report_parts.append(f"房贷余额：{round(loans['housing_balance'], 2)}万元")
+            if loans['car_count']:
+                report_parts.append(f"车贷数：{loans['car_count']}")
+                report_parts.append(f"车贷余额：{round(loans['car_balance'], 2)}万元")
+            report_parts.append(f"小网贷的机构数：{loans['micro_count']}")
+            report_parts.append(f"小网贷的余额：{round(loans['micro_balance'], 2)}万元")
         report_parts.append("")
         
         report_parts.append("*信用卡")
@@ -516,7 +504,11 @@ async def analyze(file: UploadFile):
             report_parts.append(f"当逾：{credits['overdue']}个")
         if credits['abnormal_display']:
             report_parts.append(f"非正常：{credits['abnormal_display']}")
-        if credits['count'] > 0:
+        
+        # 检查信用卡是否有有效数据
+        if credits['count'] == 0 and credits['limit'] == 0 and credits['used'] == 0:
+            report_parts.append("无")
+        else:
             report_parts.append(f"机构数：{credits['count']}")
             report_parts.append(f"授信额：{round(credits['limit'], 2)}万元")
             report_parts.append(f"已用额度：{round(credits['used'], 2)}万元")
@@ -545,7 +537,7 @@ async def analyze(file: UploadFile):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "paddleocr_final"}
+    return {"status": "ok", "version": "paddleocr_final_v2"}
 
 
 @app.get("/")
