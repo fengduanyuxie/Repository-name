@@ -35,18 +35,21 @@ if not SCNET_API_KEY:
 MICRO_KEYWORDS = [
     "网商", "微众", "亿联", "金城", "裕民", "海峡", "振兴", "新网",
     "苏商", "中关村", "富民", "锡商", "百信", "长安", "兰州",
-    "威海", "众邦", "蓝海", "华通", "华瑞", "友利"
+    "威海", "众邦", "蓝海", "华通", "华瑞", "友利", "度小满", "美团",
+    "京东", "蚂蚁", "消费金融", "小额贷款", "哈银", "中融", "小米",
+    "众安", "中银", "蒙商", "杭银", "长银", "锦程", "中原"
 ]
 
-HOUSING_KEYWORDS = ["个人住房", "住房贷款", "商用房", "公积金", "住房公积金"]
-CAR_KEYWORDS = ["汽车"]
+HOUSING_KEYWORDS = ["个人住房", "住房贷款", "商用房", "公积金", "住房公积金", "个人住房商业贷款"]
+CAR_KEYWORDS = ["汽车", "车贷", "汽车消费", "购车"]
 
 BANK_KEYWORDS = [
     "工商银行", "农业银行", "中国银行", "建设银行", "交通银行",
     "招商银行", "浦发银行", "中信银行", "光大银行", "华夏银行",
     "民生银行", "广发银行", "平安银行", "兴业银行", "浙商银行",
     "邮储银行", "北京银行", "上海银行", "江苏银行", "宁波银行",
-    "南京银行", "杭州银行"
+    "南京银行", "杭州银行", "南昌农村商业银行", "江西万载农村商业银行",
+    "宁波甬城农村商业银行"
 ]
 
 
@@ -271,39 +274,57 @@ def extract_loans_from_elements(elements: List[Dict]) -> Dict[str, Any]:
         "overdue_count": 0
     }
     
-    seen_ids = set()
-    
     for element in elements:
-        elem_id = element.get("element_id", "")
-        if elem_id in seen_ids:
-            continue
-        seen_ids.add(elem_id)
-        
         text = element.get("text", "")
+        
+        # 按行分割
         lines = text.split('\n')
         
         for line in lines:
             line = line.strip()
-            if not re.match(r'^\d+\.', line):
+            if not line:
                 continue
-            if "发放" not in line and "授信" not in line:
+            
+            # 检查是否是贷款记录（数字点号开头 或 包含"发放"或"授信"）
+            is_loan_record = re.match(r'^\d+\.', line) or ("发放" in line and "元" in line) or ("授信" in line and "额度" in line)
+            if not is_loan_record:
                 continue
+            
+            # 跳过已结清/销户的记录
             if re.search(r'已\s*结\s*清', line) or "已转出" in line or "销户" in line:
                 continue
             
-            balance_match = re.search(r'余额[为]?([\d,]+)', line)
+            # 提取余额
+            balance_match = re.search(r'余额[为]?\s*([\d,]+)', line)
             balance = clean_number(balance_match.group(1)) if balance_match else 0
             
-            inst_match = re.search(r'\d{4}年\d{1,2}月\d{1,2}日([^发放授信]+?)(?:发放|为)', line)
-            institution = inst_match.group(1).strip() if inst_match else ''
+            # 提取机构名称
+            institution = ""
+            inst_match = re.search(r'(\d{4}年\d{1,2}月\d{1,2}日)?([^发放授信]+?)(?:发放|为|授信)', line)
+            if inst_match:
+                institution = inst_match.group(2).strip()
+            if not institution:
+                inst_match = re.search(r'([\u4e00-\u9fa5]+(?:银行|公司|金融|小额贷款|消费金融))', line)
+                if inst_match:
+                    institution = inst_match.group(1)
+            
+            # 如果仍然没有机构名称，尝试用关键词匹配
+            if not institution:
+                for kw in MICRO_KEYWORDS + BANK_KEYWORDS:
+                    if kw in line:
+                        institution = kw
+                        break
+            
+            if not institution:
+                continue
             
             loans["count"] += 1
             if balance > 0:
                 loans["balance"] += balance / 10000
             
+            # 分类
             is_housing = any(kw in line for kw in HOUSING_KEYWORDS)
             is_car = any(kw in line for kw in CAR_KEYWORDS)
-            is_micro = is_micro_institution(institution) and not is_housing and not is_car
             
             if is_housing:
                 loans["housing_count"] += 1
@@ -313,12 +334,16 @@ def extract_loans_from_elements(elements: List[Dict]) -> Dict[str, Any]:
                 loans["car_count"] += 1
                 if balance > 0:
                     loans["car_balance"] += balance / 10000
-            elif is_micro:
-                loans["micro_count"] += 1
-                if balance > 0:
-                    loans["micro_balance"] += balance / 10000
+            else:
+                # 判断是否小网贷
+                is_micro = is_micro_institution(institution)
+                if is_micro:
+                    loans["micro_count"] += 1
+                    if balance > 0:
+                        loans["micro_balance"] += balance / 10000
             
-            if "当前有逾期" in line:
+            # 检查当前逾期
+            if "当前有逾期" in line or "当前逾期" in line:
                 loans["overdue_count"] += 1
     
     return loans
@@ -330,42 +355,47 @@ def extract_credits_from_elements(elements: List[Dict]) -> Dict[str, Any]:
         "abnormal": {"stop_payment": 0, "frozen": 0, "doubtful": 0}
     }
     
-    seen_ids = set()
-    
     for element in elements:
-        elem_id = element.get("element_id", "")
-        if elem_id in seen_ids:
-            continue
-        seen_ids.add(elem_id)
-        
         text = element.get("text", "")
         lines = text.split('\n')
         
         for line in lines:
             line = line.strip()
-            if not line or not re.match(r'^\d+\.', line):
+            if not line:
                 continue
-            if '贷记卡' not in line or '人民币' not in line:
+            
+            # 检查是否是贷记卡记录
+            if '贷记卡' not in line:
                 continue
+            
+            # 跳过美元、未激活、已销户
             if '美元' in line or '尚未激活' in line or '销户' in line:
                 continue
             
-            limit_match = re.search(r'信用额度([\d,]+)', line)
+            # 提取信用额度
+            limit_match = re.search(r'信用额度\s*([\d,]+)', line)
             if not limit_match:
                 continue
             limit = clean_number(limit_match.group(1))
             
-            used_match = re.search(r'已使用额度([\d,]+)', line)
-            if not used_match:
-                used_match = re.search(r'余额([\d,]+)', line)
-            used = clean_number(used_match.group(1)) if used_match else 0
+            if limit == 0:
+                continue
             
-            if limit > 0:
-                credits["count"] += 1
-                credits["limit"] += limit / 10000
+            # 提取已使用额度（多种格式）
+            used = 0
+            used_match = re.search(r'已使用额度\s*([\d,]+)', line)
+            if not used_match:
+                used_match = re.search(r'余额\s*([\d,]+)', line)
+            if used_match:
+                used = clean_number(used_match.group(1))
+            
+            credits["count"] += 1
+            credits["limit"] += limit / 10000
+            if used > 0:
                 credits["used"] += used / 10000
             
-            if "当前有逾期" in line:
+            # 检查逾期和异常状态
+            if "当前有逾期" in line or "有逾期" in line:
                 credits["overdue"] += 1
             if "呆账" in line:
                 credits["abnormal"]["doubtful"] += 1
@@ -374,8 +404,13 @@ def extract_credits_from_elements(elements: List[Dict]) -> Dict[str, Any]:
             if "冻结" in line:
                 credits["abnormal"]["frozen"] += 1
     
-    credits["usage_rate"] = round((credits["used"] / credits["limit"] * 100)) if credits["limit"] > 0 else 0
+    # 计算使用率
+    if credits["limit"] > 0:
+        credits["usage_rate"] = round((credits["used"] / credits["limit"] * 100))
+    else:
+        credits["usage_rate"] = 0
     
+    # 构建异常显示
     abnormal_parts = []
     if credits["abnormal"]["stop_payment"] > 0:
         abnormal_parts.append(f"止付{credits['abnormal']['stop_payment']}个")
@@ -397,20 +432,22 @@ def extract_guarantee_from_elements(elements: List[Dict]) -> Tuple[int, float]:
         if "承担相关还款责任" not in text and "相关还款责任金额" not in text:
             continue
         
-        amount_match = re.search(r'相关还款责任金额\s*([\d,]+)', text)
-        if not amount_match:
-            continue
+        # 提取责任金额
+        amount_matches = re.findall(r'相关还款责任金额\s*([\d,]+)', text)
+        balance_matches = re.findall(r'贷款余额\s*([\d,]+)', text)
         
-        count += 1
-        amount = clean_number(amount_match.group(1))
-        
-        balance_match = re.search(r'余额\s*([\d,]+)', text)
-        if balance_match:
-            loan_balance = clean_number(balance_match.group(1))
-            min_value = min(amount, loan_balance) if amount > 0 and loan_balance > 0 else amount
-            balance += min_value / 10000
-        else:
-            balance += amount / 10000
+        for i, amount_match in enumerate(amount_matches):
+            amount = clean_number(amount_match)
+            if amount == 0:
+                continue
+            
+            count += 1
+            if i < len(balance_matches):
+                loan_balance = clean_number(balance_matches[i])
+                min_value = min(amount, loan_balance) if amount > 0 and loan_balance > 0 else amount
+                balance += min_value / 10000
+            else:
+                balance += amount / 10000
     
     return count, balance
 
@@ -424,6 +461,7 @@ def extract_queries_from_elements(elements: List[Dict], report_date: datetime) -
     for element in elements:
         text = element.get("text", "")
         
+        # 机构查询（贷款审批、信用卡审批等）
         if "贷款审批" in text or "信用卡审批" in text or "担保资格审查" in text:
             date_match = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', text)
             if date_match:
@@ -444,6 +482,7 @@ def extract_queries_from_elements(elements: List[Dict], report_date: datetime) -
                     if inst_match and is_micro_institution(inst_match.group(1)):
                         queries["micro_60d"] += 1
         
+        # 本人查询
         if "本人查询" in text:
             date_match = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', text)
             if date_match:
@@ -611,20 +650,26 @@ async def analyze(file: UploadFile):
         part1_lines.append("")
         
         part1_lines.append("*贷款")
-        part1_lines.append(f"机构数：{loans['count']}")
+        part1_lines.append(f"当逾：{loans['overdue_count']}个")
+        part1_lines.append(f"机构数：{loans['count']}家")
         part1_lines.append(f"总余额：{round(loans['balance'], 2)}万元")
-        part1_lines.append(f"房贷数：{loans['housing_count']}")
+        part1_lines.append(f"房贷数：{loans['housing_count']}笔")
         if loans['housing_count'] > 0:
             part1_lines.append(f"房贷余额：{round(loans['housing_balance'], 2)}万元")
+        part1_lines.append(f"车贷数：{loans['car_count']}笔")
         if loans['car_count'] > 0:
-            part1_lines.append(f"车贷数：{loans['car_count']}")
             part1_lines.append(f"车贷余额：{round(loans['car_balance'], 2)}万元")
-        part1_lines.append(f"小网贷的机构数：{loans['micro_count']}")
+        part1_lines.append(f"小网贷的机构数：{loans['micro_count']}家")
         part1_lines.append(f"小网贷的余额：{round(loans['micro_balance'], 2)}万元")
         part1_lines.append("")
         
         part1_lines.append("*信用卡")
-        part1_lines.append(f"机构数：{credits['count']}")
+        part1_lines.append(f"当逾：{credits['overdue']}个")
+        if credits['abnormal_display']:
+            part1_lines.append(f"非正常：{credits['abnormal_display']}")
+        else:
+            part1_lines.append("非正常：无")
+        part1_lines.append(f"机构数：{credits['count']}家")
         part1_lines.append(f"授信额：{round(credits['limit'], 2)}万元")
         part1_lines.append(f"已用额度：{round(credits['used'], 2)}万元")
         part1_lines.append(f"使用率：{credits['usage_rate']}%")
@@ -632,7 +677,7 @@ async def analyze(file: UploadFile):
         
         if guarantee_count > 0 or guarantee_balance > 0:
             part1_lines.append("*担保信息")
-            part1_lines.append(f"担保户数：{guarantee_count}")
+            part1_lines.append(f"担保户数：{guarantee_count}户")
             part1_lines.append(f"担保余额：{round(guarantee_balance, 2)}万元")
             part1_lines.append("")
         
@@ -655,7 +700,7 @@ async def analyze(file: UploadFile):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "scnet_ocr_v2"}
+    return {"status": "ok", "version": "scnet_ocr_v3"}
 
 
 @app.get("/")
