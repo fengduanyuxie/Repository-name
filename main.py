@@ -1,5 +1,5 @@
 # main.py
-# 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版（最终修复版）
+# 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版（最终确定版）
 
 import os
 import re
@@ -134,17 +134,15 @@ def extract_public_records(text: str) -> str:
 
 
 def extract_loans_from_text(text: str) -> Dict[str, Any]:
-    """按机构去重统计贷款（未结清账户，余额=0也计入），余额累加"""
-    institutions = {}  # {机构名: {"balance": 0, "type": "", "overdue": False}}
+    """按机构去重统计贷款，余额累加"""
+    institutions = {}
     
-    lines = text.split('\n')
-    for line in lines:
+    for line in text.split('\n'):
         line = line.strip()
         if not line or not re.match(r'^\d+\.', line):
             continue
         if "发放" not in line and "授信" not in line:
             continue
-        # 跳过已结清、已转出、销户的账户
         if "已结清" in line or "已转出" in line or "销户" in line:
             continue
         
@@ -152,22 +150,12 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
         balance_match = re.search(r'余额[为]?\s*([\d,]+)', line)
         balance = clean_number(balance_match.group(1)) if balance_match else 0
         
-        # 提取机构名 - 多种模式尝试
+        # 提取机构名 - 使用简单可靠的 split 方法
         institution = ""
-        # 模式1: 2024年12月02日样例汽车金融公司发放的
-        match1 = re.search(r'\d{4}\s*年\d{1,2}\s*月\d{1,2}\s*日([^发放授信]+?)(?:发放|为)', line)
-        if match1:
-            institution = match1.group(1).strip()
-        # 模式2: 日样例银行发放的
-        if not institution:
-            match2 = re.search(r'日([^发放授信]+?)(?:发放|为)', line)
-            if match2:
-                institution = match2.group(1).strip()
-        # 模式3: 授信场景：为其他个人消费贷款授信
-        if not institution:
-            match3 = re.search(r'为([^授信]+?)授信', line)
-            if match3:
-                institution = match3.group(1).strip()
+        if "日" in line and "发放" in line:
+            institution = line.split("日")[1].split("发放")[0].strip()
+        elif "日" in line and "为" in line and "授信" in line:
+            institution = line.split("日")[1].split("为")[0].strip()
         
         if not institution:
             continue
@@ -290,7 +278,7 @@ def extract_queries_from_html(text: str, report_date: datetime) -> Dict[str, int
     queries = {"30d": 0, "31_90d": 0, "91_180d": 0, "181_360d": 0, "micro_60d": 0, "self_60d": 0}
     
     # 机构查询
-    inst_pattern = r'<td style=\'text-align: center; word-wrap: break-word;\'>(\d{4}年\d{1,2}月\d{1,2}日)</table>\s*<td style=\'text-align: center; word-wrap: break-word;\'>([^<]+)</td>\s*<td style=\'text-align: center; word-wrap: break-word;\'>(贷款审批|信用卡审批|资信审查|担保资格审查|保前审查)</td>'
+    inst_pattern = r'<td style=\'text-align: center; word-wrap: break-word;\'>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td style=\'text-align: center; word-wrap: break-word;\'>([^<]+)</td>\s*<td style=\'text-align: center; word-wrap: break-word;\'>(贷款审批|信用卡审批|资信审查|担保资格审查|保前审查)</td>'
     for match in re.finditer(inst_pattern, text):
         date_str, institution, reason = match.group(1), match.group(2).strip(), match.group(3)
         if "贷后" in reason:
@@ -465,7 +453,7 @@ async def analyze(file: UploadFile):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "paddleocr_v6_final"}
+    return {"status": "ok", "version": "paddleocr_v7_final"}
 
 
 @app.get("/")
