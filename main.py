@@ -1,5 +1,5 @@
 # main.py
-# 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版
+# 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版（最终修复版）
 
 import os
 import re
@@ -50,7 +50,6 @@ def parse_pdf_with_paddleocr(pdf_bytes: bytes) -> str:
     if result.get("errorCode") != 0 and result.get("errorCode") is not None:
         raise Exception(f"PaddleOCR 业务错误: {result.get('errorMsg', '未知错误')}")
     
-    # 提取所有页面的 Markdown 文本
     full_markdown = ""
     for res in result.get("result", {}).get("layoutParsingResults", []):
         full_markdown += res.get("markdown", {}).get("text", "") + "\n"
@@ -90,7 +89,6 @@ def extract_report_date(text: str) -> datetime:
 
 
 def is_micro_institution(institution_name: str) -> bool:
-    """不含'银行'就是小网贷"""
     if any(bk in institution_name for bk in BANK_KEYWORDS):
         return False
     if any(kw in institution_name for kw in MICRO_KEYWORDS):
@@ -110,12 +108,12 @@ def extract_advance_payment(text: str) -> Tuple[int, float]:
 
 def extract_overdue(text: str) -> Dict[str, int]:
     overdue = {"total_months": 0, "90d_count": 0}
-    # 匹配：最近5年内有X个月处于逾期状态（支持空格）
+    # 总逾期月数：累加所有 "最近5年内有X个月处于逾期状态"
     for m in re.findall(r'最近\s*5\s*年内有\s*(\d+)\s*个月处于逾期状态', text):
         overdue["total_months"] += int(m)
-    # 匹配：其中X个月逾期超过90天（支持空格）
-    for m in re.findall(r'其中\s*(\d+)\s*个月逾期超过\s*90\s*天', text):
-        overdue["90d_count"] += int(m)
+    # 90天以上账户数：统计有多少个账户包含 "其中X个月逾期超过90天"（每个账户计1）
+    # 正确值应该是出现次数，而不是累加月份数
+    overdue["90d_count"] = len(re.findall(r'其中\s*\d+\s*个月逾期超过\s*90\s*天', text))
     return overdue
 
 
@@ -125,16 +123,14 @@ def extract_public_records(text: str) -> str:
     tax_match = re.search(r'欠税总额[：:]\s*([\d,]+)', text)
     if tax_match:
         records.append(f"欠税1条，金额{clean_number(tax_match.group(1))/10000:.2f}万元")
-    # 民事判决 - 从表格中提取诉讼标的金额
+    # 民事判决 - 诉讼标的金额
     judgment_amounts = re.findall(r'诉讼标的金额[：:]\s*([\d,]+)', text)
     if judgment_amounts:
-        total = sum(clean_number(a) for a in judgment_amounts)
-        records.append(f"民事判决{len(judgment_amounts)}件，金额{total/10000:.2f}万元")
-    # 强制执行 - 从表格中提取申请执行标的金额
+        records.append(f"民事判决{len(judgment_amounts)}件，金额{sum(clean_number(a) for a in judgment_amounts)/10000:.2f}万元")
+    # 强制执行 - 申请执行标的金额
     enforcement_amounts = re.findall(r'申请执行标的金额[：:]\s*([\d,]+)', text)
     if enforcement_amounts:
-        total = sum(clean_number(a) for a in enforcement_amounts)
-        records.append(f"强制执行{len(enforcement_amounts)}件，金额{total/10000:.2f}万元")
+        records.append(f"强制执行{len(enforcement_amounts)}件，金额{sum(clean_number(a) for a in enforcement_amounts)/10000:.2f}万元")
     # 行政处罚
     penalty_match = re.search(r'处罚金额[：:]\s*([\d,]+)', text)
     if penalty_match:
@@ -143,6 +139,7 @@ def extract_public_records(text: str) -> str:
 
 
 def extract_loans_from_text(text: str) -> Dict[str, Any]:
+    """只统计余额 > 0 的贷款账户"""
     loans = {"count": 0, "balance": 0.0, "housing_count": 0, "housing_balance": 0.0, "car_count": 0, "car_balance": 0.0, "micro_count": 0, "micro_balance": 0.0, "overdue_count": 0}
     
     for line in text.split('\n'):
@@ -154,14 +151,18 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
         if "已结清" in line or "已转出" in line or "销户" in line:
             continue
         
-        balance = clean_number(re.search(r'余额[为]?\s*([\d,]+)', line).group(1)) if re.search(r'余额[为]?\s*([\d,]+)', line) else 0
+        balance_match = re.search(r'余额[为]?\s*([\d,]+)', line)
+        balance = clean_number(balance_match.group(1)) if balance_match else 0
+        
+        # 只统计余额 > 0 的账户（按用户选择 B）
+        if balance <= 0:
+            continue
         
         inst_match = re.search(r'\d{4}\s*年\d{1,2}\s*月\d{1,2}\s*日([^发放授信]+?)(?:发放|为)', line)
         institution = inst_match.group(1).strip() if inst_match else ""
         
         loans["count"] += 1
-        if balance > 0:
-            loans["balance"] += balance / 10000
+        loans["balance"] += balance / 10000
         
         is_housing = any(kw in line for kw in HOUSING_KEYWORDS)
         is_car = any(kw in line for kw in CAR_KEYWORDS)
@@ -241,31 +242,53 @@ def extract_guarantee_from_text(text: str) -> Tuple[int, float]:
     return count, balance
 
 
-def extract_queries_from_text(text: str, report_date: datetime) -> Dict[str, int]:
+def extract_queries_from_html(text: str, report_date: datetime) -> Dict[str, int]:
+    """从 HTML 表格中提取查询记录"""
     queries = {"30d": 0, "31_90d": 0, "91_180d": 0, "181_360d": 0, "micro_60d": 0, "self_60d": 0}
     
-    # 机构查询（排除贷后管理）
-    for match in re.finditer(r'(\d{4})年(\d{1,2})月(\d{1,2})日\s+([^\d\n]+?)\s+(?:贷款审批|信用卡审批|资信审查|担保资格审查|保前审查)', text):
-        y, m, d, institution = int(match.group(1)), int(match.group(2)), int(match.group(3)), match.group(4).strip()
-        diff_days = (report_date - datetime(y, m, d)).days
-        if 0 <= diff_days <= 360:
-            if diff_days <= 30:
-                queries["30d"] += 1
-            elif diff_days <= 90:
-                queries["31_90d"] += 1
-            elif diff_days <= 180:
-                queries["91_180d"] += 1
-            else:
-                queries["181_360d"] += 1
-            if diff_days <= 60 and is_micro_institution(institution):
-                queries["micro_60d"] += 1
+    # 机构查询 - 从 HTML 表格中提取
+    # 匹配模式：<td>查询日期</td><td>机构</td><td>原因</td>
+    inst_pattern = r'<td style=\'text-align: center; word-wrap: break-word;\'>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td style=\'text-align: center; word-wrap: break-word;\'>([^<]+)</td>\s*<td style=\'text-align: center; word-wrap: break-word;\'>(贷款审批|信用卡审批|资信审查|担保资格审查|保前审查)</td>'
+    
+    for match in re.finditer(inst_pattern, text):
+        date_str, institution, reason = match.group(1), match.group(2).strip(), match.group(3)
+        # 跳过贷后管理
+        if "贷后" in reason:
+            continue
+        try:
+            date_match = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', date_str)
+            if date_match:
+                y, m, d = int(date_match.group(1)), int(date_match.group(2)), int(date_match.group(3))
+                query_date = datetime(y, m, d)
+                diff_days = (report_date - query_date).days
+                if 0 <= diff_days <= 360:
+                    if diff_days <= 30:
+                        queries["30d"] += 1
+                    elif diff_days <= 90:
+                        queries["31_90d"] += 1
+                    elif diff_days <= 180:
+                        queries["91_180d"] += 1
+                    else:
+                        queries["181_360d"] += 1
+                    if diff_days <= 60 and is_micro_institution(institution):
+                        queries["micro_60d"] += 1
+        except:
+            pass
     
     # 本人查询
-    for match in re.finditer(r'(\d{4})年(\d{1,2})月(\d{1,2})日\s+本人', text):
-        y, m, d = int(match.group(1)), int(match.group(2)), int(match.group(3))
-        diff_days = (report_date - datetime(y, m, d)).days
-        if 0 <= diff_days <= 60:
-            queries["self_60d"] += 1
+    self_pattern = r'<td style=\'text-align: center; word-wrap: break-word;\'>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td style=\'text-align: center; word-wrap: break-word;\'>本人</td>'
+    for match in re.finditer(self_pattern, text):
+        date_str = match.group(1)
+        try:
+            date_match = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', date_str)
+            if date_match:
+                y, m, d = int(date_match.group(1)), int(date_match.group(2)), int(date_match.group(3))
+                query_date = datetime(y, m, d)
+                diff_days = (report_date - query_date).days
+                if 0 <= diff_days <= 60:
+                    queries["self_60d"] += 1
+        except:
+            pass
     
     return queries
 
@@ -342,7 +365,7 @@ async def analyze(file: UploadFile):
         asset_count, asset_balance = extract_asset_disposal(markdown_text)
         advance_count, advance_amount = extract_advance_payment(markdown_text)
         public_records = extract_public_records(markdown_text)
-        queries = extract_queries_from_text(markdown_text, report_date)
+        queries = extract_queries_from_html(markdown_text, report_date)
         risk_warning = build_risk_warning(asset_count, asset_balance, advance_count, advance_amount, loans, credits, public_records)
         
         stats = {"gender": gender, "age": age, "marriage": marriage, "queries": queries, "loans": loans, "credits": credits, "overdue": overdue}
@@ -403,7 +426,7 @@ async def analyze(file: UploadFile):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "paddleocr_v3"}
+    return {"status": "ok", "version": "paddleocr_v4_final"}
 
 
 @app.get("/")
