@@ -1,5 +1,5 @@
 # main.py
-# 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版（最终确定版）
+# 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版（最终版）
 
 import os
 import re
@@ -134,7 +134,7 @@ def extract_public_records(text: str) -> str:
 
 
 def extract_loans_from_text(text: str) -> Dict[str, Any]:
-    """按机构去重统计贷款，余额累加"""
+    """按机构去重统计贷款，余额=0也计入，余额累加"""
     institutions = {}
     
     for line in text.split('\n'):
@@ -143,6 +143,7 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
             continue
         if "发放" not in line and "授信" not in line:
             continue
+        # 跳过已结清、已转出、销户的账户
         if "已结清" in line or "已转出" in line or "销户" in line:
             continue
         
@@ -174,7 +175,7 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
         else:
             loan_type = "other"
         
-        # 按机构累加
+        # 按机构累加（余额=0也计入机构数）
         if institution not in institutions:
             institutions[institution] = {"balance": 0, "type": loan_type, "overdue": False}
         
@@ -453,7 +454,7 @@ async def analyze(file: UploadFile):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "paddleocr_v7_final"}
+    return {"status": "ok", "version": "paddleocr_v8_final"}
 
 
 @app.get("/")
