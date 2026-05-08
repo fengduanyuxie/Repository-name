@@ -47,7 +47,6 @@ def clean_number(num_str: str) -> float:
     if not num_str:
         return 0.0
     try:
-        # 先替换逗号，再移除其他非数字字符
         cleaned = num_str.replace(',', '').replace('，', '').replace(' ', '')
         cleaned = re.sub(r'[^\d.-]', '', cleaned)
         return float(cleaned) if cleaned else 0.0
@@ -238,39 +237,33 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
 
 
 def extract_credits_from_text(text: str) -> Dict[str, Any]:
-    """提取信用卡信息 - 使用正则提取所有贷记卡段落"""
+    """提取信用卡信息 - 简单行匹配，只要包含'贷记卡'就处理"""
     credits = {"count": 0, "limit": 0.0, "used": 0.0, "overdue": 0, "abnormal": {"stop_payment": 0, "frozen": 0, "doubtful": 0}}
     
-    # 正则提取所有 "数字. 内容" 格式的贷记卡记录
-    # 匹配从 "数字." 开始，包含"贷记卡"，直到下一个 "数字." 或结束
-    pattern = r'(\d+\.\s*[^。]*?贷记卡.*?)(?=\n\d+\.|\n*$)'
-    matches = re.findall(pattern, text, re.DOTALL)
-    
-    for match in matches:
-        line = match.strip()
+    for line in text.split('\n'):
+        line = line.strip()
         if not line:
             continue
         
-        # 排除非人民币
+        # 只要包含"贷记卡"就处理
+        if "贷记卡" not in line:
+            continue
+        
         if "美元" in line:
             continue
         
-        # 排除已销户
         if "销户" in line:
             continue
         
-        # 排除尚未激活
         if "尚未激活" in line:
             continue
         
-        # 提取信用额度
         limit_match = re.search(r'信用额度\s*([\d,]+)', line)
         if not limit_match:
             continue
         
         limit = clean_number(limit_match.group(1))
         
-        # 提取已用额度
         used_match = re.search(r'已使用额度\s*([\d,]+)', line) or re.search(r'余额\s*([\d,]+)', line)
         used = clean_number(used_match.group(1)) if used_match else 0
         
@@ -326,18 +319,13 @@ def extract_guarantee_from_text(text: str) -> Tuple[int, float]:
 
 
 def extract_queries_from_html(text: str, report_date: datetime) -> Dict[str, int]:
-    """从 HTML 表格中提取查询记录，支持有编号和无编号两种格式"""
     queries = {"30d": 0, "31_90d": 0, "91_180d": 0, "181_360d": 0, "micro_60d": 0, "self_60d": 0}
     
     valid_reasons = ["贷款审批", "信用卡审批", "资信审查", "担保资格审查", "保前审查", "法人代表"]
     
-    # 方式1：有编号列（编号, 日期, 机构, 原因）
     pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)<tr>'
+    pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)<tr>'
     
-    # 方式2：无编号列（日期, 机构, 原因）
-    pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</tr>'
-    
-    # 先尝试有编号的匹配
     matches = list(re.finditer(pattern_with_id, text))
     if not matches:
         matches = list(re.finditer(pattern_no_id, text))
@@ -374,8 +362,7 @@ def extract_queries_from_html(text: str, report_date: datetime) -> Dict[str, int
         except:
             pass
     
-    # 本人查询
-    self_pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</tr>'
+    self_pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
     self_pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
     
     self_matches = list(re.finditer(self_pattern_with_id, text))
@@ -475,7 +462,6 @@ async def analyze(file: UploadFile):
         
         stats = {"gender": gender, "age": age, "marriage": marriage, "queries": queries, "loans": loans, "credits": credits, "overdue": overdue}
         
-        # 构建报告
         report_parts = []
         report_parts.append("### 第一部分：简要汇总")
         report_parts.append("")
@@ -558,7 +544,7 @@ async def analyze(file: UploadFile):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "paddleocr_final_v5"}
+    return {"status": "ok", "version": "paddleocr_final"}
 
 
 @app.get("/")
