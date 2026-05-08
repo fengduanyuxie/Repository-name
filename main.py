@@ -236,11 +236,16 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
 
 
 def extract_credits_from_text(text: str) -> Dict[str, Any]:
+    """提取信用卡信息，排除非人民币（美元）账户"""
     credits = {"count": 0, "limit": 0.0, "used": 0.0, "overdue": 0, "abnormal": {"stop_payment": 0, "frozen": 0, "doubtful": 0}}
     
     for line in text.split('\n'):
         line = line.strip()
         if not line or not re.match(r'^\d+\.', line):
+            continue
+        
+        # 排除非人民币（美元账户）
+        if "美元" in line:
             continue
         
         if "贷记卡" not in line:
@@ -257,12 +262,9 @@ def extract_credits_from_text(text: str) -> Dict[str, Any]:
             continue
         
         limit = clean_number(limit_match.group(1))
-        if limit <= 0:
-            continue
+        # 额度为0的信用卡也计入（不跳过）
         
-        used_match = re.search(r'余额\s*([\d,]+)', line)
-        if not used_match:
-            used_match = re.search(r'已使用额度\s*([\d,]+)', line)
+        used_match = re.search(r'已使用额度\s*([\d,]+)', line) or re.search(r'余额\s*([\d,]+)', line)
         used = clean_number(used_match.group(1)) if used_match else 0
         
         credits["count"] += 1
@@ -322,37 +324,25 @@ def extract_queries_from_html(text: str, report_date: datetime) -> Dict[str, int
     
     valid_reasons = ["贷款审批", "信用卡审批", "资信审查", "担保资格审查", "保前审查", "法人代表"]
     
-    # 打印调试信息
-    print("\n" + "=" * 60)
-    print("【调试】查询记录提取")
-    print("=" * 60)
-    
     # 方式1：有编号列（编号, 日期, 机构, 原因）
-    pattern_with_id = r'<td[^>]*>\d+<tr>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)<tr>\s*<td[^>]*>([^<]+)</table>'
+    pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</tr>'
     
     # 方式2：无编号列（日期, 机构, 原因）
     pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
     
     # 先尝试有编号的匹配
     matches = list(re.finditer(pattern_with_id, text))
-    matched_pattern = "有编号"
     if not matches:
         matches = list(re.finditer(pattern_no_id, text))
-        matched_pattern = "无编号"
-    
-    print(f"匹配模式: {matched_pattern}, 找到 {len(matches)} 条机构查询记录")
     
     for match in matches:
         date_str, institution, reason = match.group(1), match.group(2).strip(), match.group(3).strip()
-        print(f"  日期: {date_str}, 机构: {institution}, 原因: {reason}")
         
         if "贷后" in reason:
-            print(f"    排除: 贷后管理")
             continue
         
         is_valid = any(vr in reason for vr in valid_reasons)
         if not is_valid:
-            print(f"    排除: 无效查询原因")
             continue
         
         try:
@@ -361,31 +351,23 @@ def extract_queries_from_html(text: str, report_date: datetime) -> Dict[str, int
                 y, m, d = int(date_match.group(1)), int(date_match.group(2)), int(date_match.group(3))
                 query_date = datetime(y, m, d)
                 diff_days = (report_date - query_date).days
-                print(f"    报告日期: {report_date.date()}, 查询日期: {query_date.date()}, 相差: {diff_days}天")
                 
                 if 0 <= diff_days <= 360:
                     if diff_days <= 30:
                         queries["30d"] += 1
-                        print(f"      计入: 30天内")
                     elif diff_days <= 90:
                         queries["31_90d"] += 1
-                        print(f"      计入: 31-90天")
                     elif diff_days <= 180:
                         queries["91_180d"] += 1
-                        print(f"      计入: 91-180天")
                     else:
                         queries["181_360d"] += 1
-                        print(f"      计入: 181-360天")
                     
                     if diff_days <= 60 and is_micro_institution(institution):
                         queries["micro_60d"] += 1
-                        print(f"      计入: 60天内小网贷")
-                else:
-                    print(f"      排除: 超过360天")
-        except Exception as e:
-            print(f"    解析错误: {e}")
+        except:
+            pass
     
-    # 本人查询 - 同样支持两种格式
+    # 本人查询
     self_pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
     self_pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
     
@@ -393,28 +375,18 @@ def extract_queries_from_html(text: str, report_date: datetime) -> Dict[str, int
     if not self_matches:
         self_matches = list(re.finditer(self_pattern_no_id, text))
     
-    print(f"\n找到 {len(self_matches)} 条本人查询记录")
-    
     for match in self_matches:
         date_str = match.group(1)
-        print(f"  本人查询日期: {date_str}")
         try:
             date_match = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', date_str)
             if date_match:
                 y, m, d = int(date_match.group(1)), int(date_match.group(2)), int(date_match.group(3))
                 query_date = datetime(y, m, d)
                 diff_days = (report_date - query_date).days
-                print(f"    相差: {diff_days}天")
                 if 0 <= diff_days <= 60:
                     queries["self_60d"] += 1
-                    print(f"      计入: 60天内本人查询")
-                else:
-                    print(f"      排除: 超过60天")
-        except Exception as e:
-            print(f"    解析错误: {e}")
-    
-    print(f"\n查询结果: 30天内={queries['30d']}, 31-90天={queries['31_90d']}, 90-180天={queries['91_180d']}, 180-360天={queries['181_360d']}, 小网贷={queries['micro_60d']}, 本人={queries['self_60d']}")
-    print("=" * 60 + "\n")
+        except:
+            pass
     
     return queries
 
@@ -579,7 +551,7 @@ async def analyze(file: UploadFile):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "paddleocr_final_v3"}
+    return {"status": "ok", "version": "paddleocr_final"}
 
 
 @app.get("/")
