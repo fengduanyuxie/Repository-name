@@ -1,5 +1,4 @@
-# main.py
-# 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版（最终正式版）
+# main.py - 临时调试版（返回原始 markdown 预览）
 
 import os
 import re
@@ -20,6 +19,9 @@ DEEPSEEK_API_KEY = "sk-196eb4e5ceae4449b1c4fd319818a4ab"
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 PADDLEOCR_API_URL = "https://7ez8g52bxbp3t2m2.aistudio-app.com/layout-parsing"
 PADDLEOCR_TOKEN = "9dcb8c9a6b87fb01d65549e9d7f8619299ec53a4"
+
+# ========== 其他函数保持不变（与最终版相同）==========
+# 为了简洁，这里只列出修改的部分，完整函数请参考最终版
 
 MICRO_KEYWORDS = [
     "网商", "微众", "亿联", "金城", "裕民", "海峡", "振兴", "新网",
@@ -321,8 +323,8 @@ def extract_queries_from_html(text: str, report_date: datetime) -> Dict[str, int
     
     valid_reasons = ["贷款审批", "信用卡审批", "资信审查", "担保资格审查", "保前审查", "法人代表"]
     
-    pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
-    pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
+    pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)<tr>'
+    pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)<tr>'
     
     matches = list(re.finditer(pattern_with_id, text))
     if not matches:
@@ -443,98 +445,23 @@ async def analyze(file: UploadFile):
     
     try:
         markdown_text = parse_pdf_with_paddleocr(pdf_bytes)
-        report_date = extract_report_date(markdown_text)
-        gender = extract_gender(markdown_text)
-        age = extract_age(markdown_text, report_date)
-        marriage = extract_marriage(markdown_text)
         
-        loans = extract_loans_from_text(markdown_text)
-        credits = extract_credits_from_text(markdown_text)
-        guarantee_count, guarantee_balance = extract_guarantee_from_text(markdown_text)
-        overdue = extract_overdue(markdown_text)
-        asset_count, asset_balance = extract_asset_disposal(markdown_text)
-        advance_count, advance_amount = extract_advance_payment(markdown_text)
-        public_records = extract_public_records(markdown_text)
-        queries = extract_queries_from_html(markdown_text, report_date)
-        risk_warning = build_risk_warning(asset_count, asset_balance, advance_count, advance_amount, loans, credits, public_records)
+        # ===== 调试模式：返回原始 markdown 预览 =====
+        # 提取包含 7./8./9. 的部分
+        lines = markdown_text.split('\n')
+        relevant_lines = []
+        for i, line in enumerate(lines):
+            if re.match(r'^\d+\.', line.strip()):
+                relevant_lines.append(f"{i}: {line[:100]}")
         
-        stats = {"gender": gender, "age": age, "marriage": marriage, "queries": queries, "loans": loans, "credits": credits, "overdue": overdue}
+        return JSONResponse({
+            "debug": True,
+            "message": "调试模式 - 查看原始 markdown 中是否有第8行",
+            "markdown_length": len(markdown_text),
+            "relevant_lines": relevant_lines[:30],
+            "full_preview": markdown_text[:3000]
+        })
         
-        report_parts = []
-        report_parts.append("### 第一部分：简要汇总")
-        report_parts.append("")
-        report_parts.append("*基本信息")
-        report_parts.append(f"性别：{gender}")
-        report_parts.append(f"年龄：{age}")
-        report_parts.append(f"婚姻：{marriage}")
-        report_parts.append(f"风险预警：{risk_warning}")
-        report_parts.append("")
-        
-        report_parts.append("*查询记录")
-        report_parts.append("机构")
-        report_parts.append(f"30天内：{queries['30d']}")
-        report_parts.append(f"31-90天：{queries['31_90d']}")
-        report_parts.append(f"90-180天：{queries['91_180d']}")
-        report_parts.append(f"180-360天：{queries['181_360d']}")
-        report_parts.append(f"60天内小网贷：{queries['micro_60d']}")
-        report_parts.append("本人")
-        report_parts.append(f"60天内本人：{queries['self_60d']}")
-        report_parts.append("")
-        
-        report_parts.append("*5年内逾期")
-        report_parts.append(f"总月数：{overdue['total_months']}")
-        report_parts.append(f"90天以上的账户数：{overdue['90d_count']}")
-        report_parts.append("")
-        
-        report_parts.append("*贷款")
-        if loans['overdue_count']:
-            report_parts.append(f"当逾：{loans['overdue_count']}个")
-        
-        if loans['count'] == 0 and loans['balance'] == 0:
-            report_parts.append("无")
-        else:
-            report_parts.append(f"机构数：{loans['count']}")
-            report_parts.append(f"总余额：{round(loans['balance'], 2)}万元")
-            if loans['housing_count']:
-                report_parts.append(f"房贷数：{loans['housing_count']}")
-                report_parts.append(f"房贷余额：{round(loans['housing_balance'], 2)}万元")
-            if loans['car_count']:
-                report_parts.append(f"车贷数：{loans['car_count']}")
-                report_parts.append(f"车贷余额：{round(loans['car_balance'], 2)}万元")
-            report_parts.append(f"小网贷的机构数：{loans['micro_count']}")
-            report_parts.append(f"小网贷的余额：{round(loans['micro_balance'], 2)}万元")
-        report_parts.append("")
-        
-        report_parts.append("*信用卡")
-        if credits['overdue']:
-            report_parts.append(f"当逾：{credits['overdue']}个")
-        if credits['abnormal_display']:
-            report_parts.append(f"非正常：{credits['abnormal_display']}")
-        
-        if credits['count'] == 0 and credits['limit'] == 0 and credits['used'] == 0:
-            report_parts.append("无")
-        else:
-            report_parts.append(f"机构数：{credits['count']}")
-            report_parts.append(f"授信额：{round(credits['limit'], 2)}万元")
-            report_parts.append(f"已用额度：{round(credits['used'], 2)}万元")
-            report_parts.append(f"使用率：{credits['usage_rate']}%")
-        report_parts.append("")
-        
-        if guarantee_count or guarantee_balance:
-            report_parts.append("*担保信息")
-            report_parts.append(f"担保户数：{guarantee_count}")
-            report_parts.append(f"担保余额：{round(guarantee_balance, 2)}万元")
-            report_parts.append("")
-        
-        if public_records:
-            report_parts.append("*公共记录")
-            report_parts.append(public_records)
-        
-        part2 = call_deepseek(build_llm_prompt(stats))
-        
-        full_report = "\n".join(report_parts) + "\n\n### 第二部分：展开分析\n\n" + part2
-        
-        return JSONResponse({"success": True, "full_report": full_report})
     except Exception as e:
         print(f"错误: {str(e)}")
         raise HTTPException(500, f"处理失败: {str(e)}")
@@ -542,7 +469,7 @@ async def analyze(file: UploadFile):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "paddleocr_final"}
+    return {"status": "ok", "version": "debug_preview"}
 
 
 @app.get("/")
@@ -552,12 +479,13 @@ def frontend():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>征信报告分析系统</title>
+    <title>征信报告分析系统（调试版）</title>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
         body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background:#f5f7fa;padding:16px}
-        .container{max-width:600px;margin:0 auto;background:#fff;border-radius:24px;padding:20px;box-shadow:0 4px 20px rgba(0,0,0,0.08)}
+        .container{max-width:800px;margin:0 auto;background:#fff;border-radius:24px;padding:20px;box-shadow:0 4px 20px rgba(0,0,0,0.08)}
         h1{color:#1e3c72;border-bottom:3px solid #4a90e2;padding-bottom:12px;margin-bottom:16px;font-size:22px}
+        .version-badge{background:#f0ad4e;color:#fff;font-size:12px;padding:2px 8px;border-radius:20px;margin-left:10px}
         .desc{color:#666;font-size:14px;margin-bottom:20px}
         .upload-area{border:2px dashed #4a90e2;border-radius:20px;padding:40px 20px;text-align:center;background:#fafcff;margin:16px 0;cursor:pointer}
         .upload-area:hover{background:#eef4ff;border-color:#357abd}
@@ -575,18 +503,18 @@ def frontend():
 </head>
 <body>
 <div class="container">
-    <h1>📄 征信结构解读</h1>
-    <p class="desc">上传PDF格式的个人简版信用报告，系统将自动解析并生成专业风控报告。</p>
+    <h1>📄 征信结构解读 <span class="version-badge">调试版-查看原始数据</span></h1>
+    <p class="desc">上传PDF，查看PaddleOCR返回的原始markdown中是否有第8行（招商银行）</p>
     <div class="upload-area" id="uploadArea">
         <div class="upload-icon">📎</div>
         <div class="upload-text">点击或拖拽上传PDF文件</div>
         <div class="file-name" id="fileName"></div>
         <input type="file" id="fileInput" accept=".pdf">
     </div>
-    <button id="analyzeBtn" disabled>开始分析</button>
+    <button id="analyzeBtn" disabled>开始分析（调试模式）</button>
     <div class="loading" id="loading">正在分析，请稍候...</div>
     <div class="result-container" id="resultContainer"><div class="result" id="result"></div></div>
-    <div class="info-note">💡 提示：分析结果包含两部分 — 简要汇总 + 展开分析</div>
+    <div class="info-note">🔧 调试版 - 返回原始markdown预览，用于检查第8行是否存在</div>
 </div>
 <script>
     const uploadArea=document.getElementById('uploadArea'),fileInput=document.getElementById('fileInput'),analyzeBtn=document.getElementById('analyzeBtn'),loadingDiv=document.getElementById('loading'),resultDiv=document.getElementById('result'),resultContainer=document.getElementById('resultContainer'),fileNameSpan=document.getElementById('fileName');
@@ -622,7 +550,7 @@ def frontend():
             const resp=await fetch('/api/analyze',{method:'POST',body:formData});
             const data=await resp.json();
             if(!resp.ok)throw new Error(data.detail||'分析失败');
-            resultDiv.innerText=data.full_report;
+            resultDiv.innerText=JSON.stringify(data, null, 2);
             resultContainer.style.display='block';
             resultContainer.scrollIntoView({behavior:'smooth'});
         }catch(err){alert('错误：'+err.message);
