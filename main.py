@@ -1,5 +1,5 @@
 # main.py
-# 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版（调试版 - 含信用卡打印）
+# 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版（最终正式版）
 
 import os
 import re
@@ -47,7 +47,9 @@ def clean_number(num_str: str) -> float:
     if not num_str:
         return 0.0
     try:
-        cleaned = re.sub(r'[^\d.-]', '', str(num_str).replace(' ', '').replace('，', '').replace(',', ''))
+        # 先替换逗号，再移除其他非数字字符
+        cleaned = num_str.replace(',', '').replace('，', '').replace(' ', '')
+        cleaned = re.sub(r'[^\d.-]', '', cleaned)
         return float(cleaned) if cleaned else 0.0
     except:
         return 0.0
@@ -236,51 +238,45 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
 
 
 def extract_credits_from_text(text: str) -> Dict[str, Any]:
-    """提取信用卡信息，额度为0也计入，带调试打印"""
+    """提取信用卡信息 - 使用正则提取所有贷记卡段落"""
     credits = {"count": 0, "limit": 0.0, "used": 0.0, "overdue": 0, "abnormal": {"stop_payment": 0, "frozen": 0, "doubtful": 0}}
     
-    print("\n" + "=" * 60)
-    print("【调试】信用卡提取 - 开始扫描")
-    print("=" * 60)
+    # 正则提取所有 "数字. 内容" 格式的贷记卡记录
+    # 匹配从 "数字." 开始，包含"贷记卡"，直到下一个 "数字." 或结束
+    pattern = r'(\d+\.\s*[^。]*?贷记卡.*?)(?=\n\d+\.|\n*$)'
+    matches = re.findall(pattern, text, re.DOTALL)
     
-    for line in text.split('\n'):
-        line = line.strip()
-        if not line or not re.match(r'^\d+\.', line):
+    for match in matches:
+        line = match.strip()
+        if not line:
             continue
         
-        # 排除非人民币（美元账户）
+        # 排除非人民币
         if "美元" in line:
             continue
         
-        if "贷记卡" not in line:
-            continue
-        
-        print(f"\n找到贷记卡行: {line[:150]}...")
-        
+        # 排除已销户
         if "销户" in line:
-            print("  排除: 已销户")
             continue
         
+        # 排除尚未激活
         if "尚未激活" in line:
-            print("  排除: 尚未激活")
             continue
         
+        # 提取信用额度
         limit_match = re.search(r'信用额度\s*([\d,]+)', line)
         if not limit_match:
-            print("  排除: 未找到信用额度")
             continue
         
         limit = clean_number(limit_match.group(1))
-        print(f"  信用额度: {limit} 元")
         
+        # 提取已用额度
         used_match = re.search(r'已使用额度\s*([\d,]+)', line) or re.search(r'余额\s*([\d,]+)', line)
         used = clean_number(used_match.group(1)) if used_match else 0
-        print(f"  已用额度: {used} 元")
         
         credits["count"] += 1
         credits["limit"] += limit / 10000
         credits["used"] += used / 10000
-        print(f"  ✅ 已计入 (累计: 机构数={credits['count']}, 授信额={credits['limit']:.2f}万, 已用={credits['used']:.2f}万)")
         
         if "当前有逾期" in line:
             credits["overdue"] += 1
@@ -290,10 +286,6 @@ def extract_credits_from_text(text: str) -> Dict[str, Any]:
             credits["abnormal"]["stop_payment"] += 1
         if "冻结" in line:
             credits["abnormal"]["frozen"] += 1
-    
-    print("\n" + "=" * 60)
-    print(f"【调试】信用卡提取完成: 机构数={credits['count']}, 授信额={credits['limit']:.2f}万, 已用={credits['used']:.2f}万")
-    print("=" * 60 + "\n")
     
     credits["usage_rate"] = round((credits["used"] / credits["limit"] * 100)) if credits["limit"] > 0 else 0
     abnormal_parts = []
@@ -343,7 +335,7 @@ def extract_queries_from_html(text: str, report_date: datetime) -> Dict[str, int
     pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)<tr>'
     
     # 方式2：无编号列（日期, 机构, 原因）
-    pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
+    pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</tr>'
     
     # 先尝试有编号的匹配
     matches = list(re.finditer(pattern_with_id, text))
@@ -383,7 +375,7 @@ def extract_queries_from_html(text: str, report_date: datetime) -> Dict[str, int
             pass
     
     # 本人查询
-    self_pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
+    self_pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</tr>'
     self_pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
     
     self_matches = list(re.finditer(self_pattern_with_id, text))
@@ -566,7 +558,7 @@ async def analyze(file: UploadFile):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "paddleocr_debug"}
+    return {"status": "ok", "version": "paddleocr_final_v5"}
 
 
 @app.get("/")
@@ -576,13 +568,12 @@ def frontend():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>征信报告分析系统（调试版）</title>
+    <title>征信报告分析系统</title>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
         body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background:#f5f7fa;padding:16px}
         .container{max-width:600px;margin:0 auto;background:#fff;border-radius:24px;padding:20px;box-shadow:0 4px 20px rgba(0,0,0,0.08)}
         h1{color:#1e3c72;border-bottom:3px solid #4a90e2;padding-bottom:12px;margin-bottom:16px;font-size:22px}
-        .version-badge{background:#f0ad4e;color:#fff;font-size:12px;padding:2px 8px;border-radius:20px;margin-left:10px}
         .desc{color:#666;font-size:14px;margin-bottom:20px}
         .upload-area{border:2px dashed #4a90e2;border-radius:20px;padding:40px 20px;text-align:center;background:#fafcff;margin:16px 0;cursor:pointer}
         .upload-area:hover{background:#eef4ff;border-color:#357abd}
@@ -600,7 +591,7 @@ def frontend():
 </head>
 <body>
 <div class="container">
-    <h1>📄 征信结构解读 <span class="version-badge">调试版</span></h1>
+    <h1>📄 征信结构解读</h1>
     <p class="desc">上传PDF格式的个人简版信用报告，系统将自动解析并生成专业风控报告。</p>
     <div class="upload-area" id="uploadArea">
         <div class="upload-icon">📎</div>
@@ -611,7 +602,7 @@ def frontend():
     <button id="analyzeBtn" disabled>开始分析</button>
     <div class="loading" id="loading">正在分析，请稍候...</div>
     <div class="result-container" id="resultContainer"><div class="result" id="result"></div></div>
-    <div class="info-note">🔧 调试版 - 日志中会输出信用卡提取详情</div>
+    <div class="info-note">💡 提示：分析结果包含两部分 — 简要汇总 + 展开分析</div>
 </div>
 <script>
     const uploadArea=document.getElementById('uploadArea'),fileInput=document.getElementById('fileInput'),analyzeBtn=document.getElementById('analyzeBtn'),loadingDiv=document.getElementById('loading'),resultDiv=document.getElementById('result'),resultContainer=document.getElementById('resultContainer'),fileNameSpan=document.getElementById('fileName');
