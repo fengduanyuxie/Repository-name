@@ -1,5 +1,4 @@
-# main.py
-# 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版（最终正式版）
+# main.py - 修复版（合并换行分割的额度）
 
 import os
 import re
@@ -237,15 +236,27 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
 
 
 def extract_credits_from_text(text: str) -> Dict[str, Any]:
-    """提取信用卡信息 - 简单行匹配，只要包含'贷记卡'就处理"""
+    """提取信用卡信息 - 先合并被换行分割的行"""
     credits = {"count": 0, "limit": 0.0, "used": 0.0, "overdue": 0, "abnormal": {"stop_payment": 0, "frozen": 0, "doubtful": 0}}
     
-    for line in text.split('\n'):
+    # 先合并被换行分割的行（修复第7条额度被分割的问题）
+    lines = text.split('\n')
+    merged_lines = []
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        # 如果当前行不是以数字加点号开头，且上一行包含"信用额度"，则合并
+        if i > 0 and not re.match(r'^\d+\.', line) and "信用额度" in merged_lines[-1] and line:
+            merged_lines[-1] += " " + line
+        else:
+            merged_lines.append(line)
+        i += 1
+    
+    for line in merged_lines:
         line = line.strip()
         if not line:
             continue
         
-        # 只要包含"贷记卡"就处理
         if "贷记卡" not in line:
             continue
         
@@ -323,8 +334,8 @@ def extract_queries_from_html(text: str, report_date: datetime) -> Dict[str, int
     
     valid_reasons = ["贷款审批", "信用卡审批", "资信审查", "担保资格审查", "保前审查", "法人代表"]
     
-    pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)<tr>'
-    pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)<tr>'
+    pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
+    pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
     
     matches = list(re.finditer(pattern_with_id, text))
     if not matches:
@@ -544,7 +555,7 @@ async def analyze(file: UploadFile):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "paddleocr_final"}
+    return {"status": "ok", "version": "paddleocr_v7_fix"}
 
 
 @app.get("/")
