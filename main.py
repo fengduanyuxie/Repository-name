@@ -1,5 +1,5 @@
 # main.py
-# 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版（最终正式版）
+# 征信报告分析系统 - PaddleOCR-VL-1.5 云端 API 版（最终完整版）
 
 import os
 import re
@@ -236,7 +236,7 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
 
 
 def extract_credits_from_text(text: str) -> Dict[str, Any]:
-    """提取信用卡信息，排除非人民币（美元）账户"""
+    """提取信用卡信息，额度为0也计入"""
     credits = {"count": 0, "limit": 0.0, "used": 0.0, "overdue": 0, "abnormal": {"stop_payment": 0, "frozen": 0, "doubtful": 0}}
     
     for line in text.split('\n'):
@@ -262,7 +262,7 @@ def extract_credits_from_text(text: str) -> Dict[str, Any]:
             continue
         
         limit = clean_number(limit_match.group(1))
-        # 额度为0的信用卡也计入（不跳过）
+        # 关键修复：不移除 limit <= 0 的行，额度为0也计入
         
         used_match = re.search(r'已使用额度\s*([\d,]+)', line) or re.search(r'余额\s*([\d,]+)', line)
         used = clean_number(used_match.group(1)) if used_match else 0
@@ -551,7 +551,7 @@ async def analyze(file: UploadFile):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "paddleocr_final"}
+    return {"status": "ok", "version": "paddleocr_final_v3"}
 
 
 @app.get("/")
