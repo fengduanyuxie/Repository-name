@@ -155,7 +155,6 @@ def extract_public_records(text: str) -> str:
 
 
 def extract_loans_from_text(text: str) -> Dict[str, Any]:
-    """提取贷款信息，按机构去重，余额=0也计入"""
     institutions = {}
     
     for line in text.split('\n'):
@@ -163,14 +162,12 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
         if not line or not re.match(r'^\d+\.', line):
             continue
         
-        # 排除信用卡行（包含"贷记卡"的）
         if "贷记卡" in line:
             continue
         
         if "发放" not in line and "授信" not in line:
             continue
         
-        # 跳过已结清、已转出、销户
         if "已结清" in line or "已转出" in line or "销户" in line:
             continue
         
@@ -239,7 +236,6 @@ def extract_loans_from_text(text: str) -> Dict[str, Any]:
 
 
 def extract_credits_from_text(text: str) -> Dict[str, Any]:
-    """提取信用卡信息"""
     credits = {"count": 0, "limit": 0.0, "used": 0.0, "overdue": 0, "abnormal": {"stop_payment": 0, "frozen": 0, "doubtful": 0}}
     
     for line in text.split('\n'):
@@ -247,15 +243,15 @@ def extract_credits_from_text(text: str) -> Dict[str, Any]:
         if not line or not re.match(r'^\d+\.', line):
             continue
         
-        # 必须是贷记卡
         if "贷记卡" not in line:
             continue
         
-        # 排除销户
         if "销户" in line:
             continue
         
-        # 提取信用额度
+        if "尚未激活" in line:
+            continue
+        
         limit_match = re.search(r'信用额度\s*([\d,]+)', line)
         if not limit_match:
             continue
@@ -264,8 +260,9 @@ def extract_credits_from_text(text: str) -> Dict[str, Any]:
         if limit <= 0:
             continue
         
-        # 提取已用额度
-        used_match = re.search(r'已使用额度\s*([\d,]+)', line) or re.search(r'余额\s*([\d,]+)', line)
+        used_match = re.search(r'余额\s*([\d,]+)', line)
+        if not used_match:
+            used_match = re.search(r'已使用额度\s*([\d,]+)', line)
         used = clean_number(used_match.group(1)) if used_match else 0
         
         credits["count"] += 1
@@ -324,7 +321,7 @@ def extract_queries_from_html(text: str, report_date: datetime) -> Dict[str, int
     
     valid_reasons = ["贷款审批", "信用卡审批", "资信审查", "担保资格审查", "保前审查", "法人代表"]
     
-    pattern = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</tr>'
+    pattern = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)<tr>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</table>'
     
     for match in re.finditer(pattern, text):
         date_str, institution, reason = match.group(1), match.group(2).strip(), match.group(3).strip()
@@ -483,8 +480,7 @@ async def analyze(file: UploadFile):
         if loans['overdue_count']:
             report_parts.append(f"当逾：{loans['overdue_count']}个")
         
-        # 检查贷款是否有有效数据（机构数>0 或 总余额>0）
-        if loans['count'] == 0 and loans['balance'] == 0 and loans['housing_count'] == 0 and loans['car_count'] == 0 and loans['micro_count'] == 0:
+        if loans['count'] == 0 and loans['balance'] == 0:
             report_parts.append("无")
         else:
             report_parts.append(f"机构数：{loans['count']}")
@@ -505,7 +501,6 @@ async def analyze(file: UploadFile):
         if credits['abnormal_display']:
             report_parts.append(f"非正常：{credits['abnormal_display']}")
         
-        # 检查信用卡是否有有效数据
         if credits['count'] == 0 and credits['limit'] == 0 and credits['used'] == 0:
             report_parts.append("无")
         else:
@@ -537,7 +532,7 @@ async def analyze(file: UploadFile):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "paddleocr_final_v2"}
+    return {"status": "ok", "version": "paddleocr_final"}
 
 
 @app.get("/")
