@@ -1,15 +1,15 @@
 # main.py
-# 征信报告分析系统 - 带计费管理版本（修复查询记录）
+# 征信报告分析系统 - 使用 Supabase PostgreSQL 存储用户数据
 
 import os
 import re
 import json
 import base64
 import secrets
-import sqlite3
+import asyncpg
 from datetime import datetime
-from typing import Dict, Any, Tuple
-from contextlib import contextmanager
+from typing import Dict, Any, Tuple, Optional
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Header
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,34 +25,75 @@ DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 PADDLEOCR_API_URL = os.environ.get("PADDLEOCR_API_URL", "https://7ez8g52bxbp3t2m2.aistudio-app.com/layout-parsing")
 PADDLEOCR_TOKEN = os.environ.get("PADDLEOCR_TOKEN", "")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
-# ========== 数据库初始化 ==========
-DB_PATH = "/data/users.db" if os.path.exists("/data") else "users.db"
+# 全局数据库连接池
+db_pool = None
 
-@contextmanager
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
+# ========== 数据库操作 ==========
+async def init_db_pool():
+    global db_pool
+    if DATABASE_URL:
+        db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=5)
+        await create_tables()
+        print("✅ Supabase 数据库连接成功")
+    else:
+        print("⚠️ DATABASE_URL 未设置，用户数据将不会持久化")
 
-def init_db():
-    with get_db() as conn:
-        conn.execute('''
+async def create_tables():
+    async with db_pool.acquire() as conn:
+        await conn.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 phone TEXT PRIMARY KEY,
                 api_key TEXT UNIQUE NOT NULL,
                 balance INTEGER DEFAULT 0,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                last_used_at DATETIME
+                created_at TIMESTAMP DEFAULT NOW(),
+                last_used_at TIMESTAMP
             )
         ''')
-        conn.execute('CREATE INDEX IF NOT EXISTS idx_api_key ON users(api_key)')
+        await conn.execute('CREATE INDEX IF NOT EXISTS idx_api_key ON users(api_key)')
 
-init_db()
+async def get_user_balance(phone: str, api_key: str) -> Tuple[bool, int]:
+    if not db_pool:
+        return False, 0
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow('SELECT balance FROM users WHERE phone = $1 AND api_key = $2', phone, api_key)
+        if row and row['balance'] > 0:
+            return True, row['balance']
+        return False, 0
+
+async def consume_balance(phone: str, api_key: str) -> bool:
+    if not db_pool:
+        return False
+    async with db_pool.acquire() as conn:
+        result = await conn.execute(
+            'UPDATE users SET balance = balance - 1, last_used_at = NOW() WHERE phone = $1 AND api_key = $2 AND balance > 0',
+            phone, api_key
+        )
+        return 'UPDATE 1' in result
+
+async def create_or_update_user(phone: str, api_key: str, balance: int) -> int:
+    async with db_pool.acquire() as conn:
+        existing = await conn.fetchrow('SELECT phone FROM users WHERE phone = $1', phone)
+        if existing:
+            await conn.execute('UPDATE users SET balance = balance + $1, api_key = $2 WHERE phone = $3', balance, api_key, phone)
+        else:
+            await conn.execute('INSERT INTO users (phone, api_key, balance) VALUES ($1, $2, $3)', phone, api_key, balance)
+        row = await conn.fetchrow('SELECT balance FROM users WHERE phone = $1', phone)
+        return row['balance']
+
+def generate_api_key(phone: str) -> str:
+    return f"ak_{phone[-6:]}_{secrets.token_hex(8)}"
+
+# ========== 应用生命周期 ==========
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_db_pool()
+    yield
+    if db_pool:
+        await db_pool.close()
+
+app.router.lifespan_context = lifespan
 
 # ========== 关键词库 ==========
 MICRO_KEYWORDS = ["网商", "微众", "亿联", "金城", "裕民", "海峡", "振兴", "新网", "苏商", "中关村", "富民", "锡商", "百信", "长安", "兰州", "威海", "众邦", "蓝海", "华通", "华瑞", "友利", "美团", "度小满", "京东", "蚂蚁", "小米", "苏宁", "平安普惠", "中融", "招联", "哈银", "长银", "中原", "锦程", "苏银凯基", "南银法巴", "北银", "阳光", "三快", "财付通", "小雨点", "消费金融", "海峡银行", "中关村银行", "锡商银行", "华瑞银行", "友利银行", "蓝海银行", "众邦银行"]
@@ -69,25 +110,6 @@ def clean_number(num: str) -> float:
     except:
         return 0.0
 
-def verify_user(phone: str, api_key: str):
-    with get_db() as conn:
-        row = conn.execute('SELECT balance FROM users WHERE phone = ? AND api_key = ?', (phone, api_key)).fetchone()
-        if row and row['balance'] > 0:
-            return True, row['balance']
-        return False, 0
-
-def consume_balance(phone: str, api_key: str) -> bool:
-    with get_db() as conn:
-        cur = conn.execute('SELECT balance FROM users WHERE phone = ? AND api_key = ? AND balance > 0', (phone, api_key))
-        if cur.fetchone():
-            conn.execute('UPDATE users SET balance = balance - 1, last_used_at = CURRENT_TIMESTAMP WHERE phone = ? AND api_key = ?', (phone, api_key))
-            return True
-        return False
-
-def generate_api_key(phone: str) -> str:
-    return f"ak_{phone[-6:]}_{secrets.token_hex(8)}"
-
-# ========== PDF 解析 ==========
 def parse_pdf(pdf_bytes: bytes) -> str:
     resp = requests.post(PADDLEOCR_API_URL, 
         headers={"Authorization": f"token {PADDLEOCR_TOKEN}", "Content-Type": "application/json"},
@@ -105,7 +127,6 @@ def parse_pdf(pdf_bytes: bytes) -> str:
         raise Exception("PaddleOCR 未能提取到文本内容")
     return md
 
-# ========== 征信分析函数（与原版完全相同）==========
 def extract_basic_info(text: str, report_date: datetime):
     id_match = re.search(r'证件号码[：:]\s*(\d{17}[\dXx])', text)
     gender = "男" if id_match and int(id_match.group(1)[16]) % 2 == 1 else "女" if id_match else "未知"
@@ -140,7 +161,8 @@ def extract_loans(text: str):
             continue
         if any(x in line for x in ["已结清", "已转出", "销户"]):
             continue
-        balance = clean_number(re.search(r'余额[为]?\s*([\d,]+)', line).group(1)) if re.search(r'余额[为]?\s*([\d,]+)', line) else 0
+        balance_match = re.search(r'余额[为]?\s*([\d,]+)', line)
+        balance = clean_number(balance_match.group(1)) if balance_match else 0
         inst = ""
         if "日" in line and "发放" in line:
             inst = line.split("日")[1].split("发放")[0].strip()
@@ -232,22 +254,13 @@ def extract_guarantee(text: str):
     return count, balance
 
 def extract_queries(text: str, report_date: datetime):
-    """从 HTML 表格中提取查询记录（原版正确逻辑）"""
     queries = {"30d": 0, "31_90d": 0, "91_180d": 0, "181_360d": 0, "micro_60d": 0, "self_60d": 0}
     valid_reasons = ["贷款审批", "信用卡审批", "资信审查", "担保资格审查", "保前审查", "法人代表"]
-    
-    # 机构查询 - 支持有编号和无编号两种格式
-    pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)<tr>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</table>'
+    pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
     pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
-    
-    matches = re.findall(pattern_with_id, text)
-    if not matches:
-        matches = re.findall(pattern_no_id, text)
-    
+    matches = re.findall(pattern_with_id, text) or re.findall(pattern_no_id, text)
     for date_str, institution, reason in matches:
-        if "贷后" in reason:
-            continue
-        if not any(v in reason for v in valid_reasons):
+        if "贷后" in reason or not any(v in reason for v in valid_reasons):
             continue
         try:
             y, m, d = map(int, re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', date_str).groups())
@@ -265,24 +278,14 @@ def extract_queries(text: str, report_date: datetime):
                     queries["micro_60d"] += 1
         except:
             pass
-    
-    # 本人查询
-    self_pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
-    self_pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
-    
-    self_matches = re.findall(self_pattern_with_id, text)
-    if not self_matches:
-        self_matches = re.findall(self_pattern_no_id, text)
-    
-    for date_str in self_matches:
+    self_pattern = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
+    for match in re.finditer(self_pattern, text):
         try:
-            y, m, d = map(int, re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', date_str[0] if isinstance(date_str, tuple) else date_str).groups())
-            diff = (report_date - datetime(y, m, d)).days
-            if 0 <= diff <= 60:
+            y, m, d = map(int, re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', match.group(1)).groups())
+            if 0 <= (report_date - datetime(y, m, d)).days <= 60:
                 queries["self_60d"] += 1
         except:
             pass
-    
     return queries
 
 def extract_overdue(text: str):
@@ -369,7 +372,7 @@ def call_deepseek(prompt: str) -> str:
 # ========== API 接口 ==========
 @app.post("/api/analyze")
 async def analyze(file: UploadFile, phone: str = Header(...), api_key: str = Header(...)):
-    valid, balance = verify_user(phone, api_key)
+    valid, balance = await get_user_balance(phone, api_key)
     if not valid:
         raise HTTPException(401, detail="无效的手机号或 API Key，或次数已用完")
     
@@ -394,7 +397,6 @@ async def analyze(file: UploadFile, phone: str = Header(...), api_key: str = Hea
         
         stats = {"gender": gender, "age": age, "marriage": marriage, "queries": queries, "loans": loans, "credits": credits, "overdue": overdue}
         
-        # 构建报告
         lines = [
             "### 第一部分：简要汇总", "",
             "*基本信息", f"性别：{gender}", f"年龄：{age}", f"婚姻：{marriage}", f"风险预警：{risk_warn}", "",
@@ -434,7 +436,7 @@ async def analyze(file: UploadFile, phone: str = Header(...), api_key: str = Hea
         part1 = "\n".join(lines)
         part2 = call_deepseek(build_llm_prompt(stats))
         
-        consume_balance(phone, api_key)
+        await consume_balance(phone, api_key)
         
         return JSONResponse({"success": True, "full_report": part1 + "\n\n### 第二部分：展开分析\n\n" + part2})
     except Exception as e:
@@ -519,19 +521,13 @@ async def add_user(password: str = Form(...), phone: str = Form(...), balance: i
     if not phone or balance <= 0:
         raise HTTPException(400, detail="参数错误")
     api_key = generate_api_key(phone)
-    with get_db() as conn:
-        existing = conn.execute('SELECT api_key FROM users WHERE phone = ?', (phone,)).fetchone()
-        if existing:
-            conn.execute('UPDATE users SET balance = balance + ?, api_key = ? WHERE phone = ?', (balance, api_key, phone))
-        else:
-            conn.execute('INSERT INTO users (phone, api_key, balance) VALUES (?, ?, ?)', (phone, api_key, balance))
-        row = conn.execute('SELECT balance FROM users WHERE phone = ?', (phone,)).fetchone()
-    return {"success": True, "phone": phone, "api_key": api_key, "balance": row['balance']}
+    new_balance = await create_or_update_user(phone, api_key, balance)
+    return {"success": True, "phone": phone, "api_key": api_key, "balance": new_balance}
 
 # ========== 其他接口 ==========
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "version": "v3.0_fixed"}
+    return {"status": "ok", "version": "v4.0_supabase"}
 
 @app.get("/")
 async def frontend():
