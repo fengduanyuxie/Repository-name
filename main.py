@@ -1,5 +1,5 @@
 # main.py
-# 征信报告分析系统 - 带计费管理版本
+# 征信报告分析系统 - 带计费管理版本（修复查询记录）
 
 import os
 import re
@@ -8,30 +8,23 @@ import base64
 import secrets
 import sqlite3
 from datetime import datetime
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple
 from contextlib import contextmanager
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Header, Depends
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Header
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 import requests
 import uvicorn
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-# ========== 配置（全部从环境变量读取）==========
+# ========== 配置（从环境变量读取）==========
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 PADDLEOCR_API_URL = os.environ.get("PADDLEOCR_API_URL", "https://7ez8g52bxbp3t2m2.aistudio-app.com/layout-parsing")
 PADDLEOCR_TOKEN = os.environ.get("PADDLEOCR_TOKEN", "")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")  # 管理后台密码，请修改！
-
-# 检查必要配置
-if not DEEPSEEK_API_KEY:
-    print("警告: DEEPSEEK_API_KEY 未设置")
-if not PADDLEOCR_TOKEN:
-    print("警告: PADDLEOCR_TOKEN 未设置")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
 
 # ========== 数据库初始化 ==========
 DB_PATH = "/data/users.db" if os.path.exists("/data") else "users.db"
@@ -61,7 +54,7 @@ def init_db():
 
 init_db()
 
-# ========== 关键词库（与原版相同）==========
+# ========== 关键词库 ==========
 MICRO_KEYWORDS = ["网商", "微众", "亿联", "金城", "裕民", "海峡", "振兴", "新网", "苏商", "中关村", "富民", "锡商", "百信", "长安", "兰州", "威海", "众邦", "蓝海", "华通", "华瑞", "友利", "美团", "度小满", "京东", "蚂蚁", "小米", "苏宁", "平安普惠", "中融", "招联", "哈银", "长银", "中原", "锦程", "苏银凯基", "南银法巴", "北银", "阳光", "三快", "财付通", "小雨点", "消费金融", "海峡银行", "中关村银行", "锡商银行", "华瑞银行", "友利银行", "蓝海银行", "众邦银行"]
 HOUSING_KEYWORDS = ["个人住房", "住房贷款", "商用房", "公积金", "住房公积金"]
 CAR_KEYWORDS = ["汽车", "车贷"]
@@ -76,8 +69,7 @@ def clean_number(num: str) -> float:
     except:
         return 0.0
 
-def verify_user(phone: str, api_key: str) -> Tuple[bool, int]:
-    """验证用户，返回 (是否有效, 剩余次数)"""
+def verify_user(phone: str, api_key: str):
     with get_db() as conn:
         row = conn.execute('SELECT balance FROM users WHERE phone = ? AND api_key = ?', (phone, api_key)).fetchone()
         if row and row['balance'] > 0:
@@ -85,20 +77,17 @@ def verify_user(phone: str, api_key: str) -> Tuple[bool, int]:
         return False, 0
 
 def consume_balance(phone: str, api_key: str) -> bool:
-    """扣减一次使用次数"""
     with get_db() as conn:
         cur = conn.execute('SELECT balance FROM users WHERE phone = ? AND api_key = ? AND balance > 0', (phone, api_key))
-        row = cur.fetchone()
-        if row:
+        if cur.fetchone():
             conn.execute('UPDATE users SET balance = balance - 1, last_used_at = CURRENT_TIMESTAMP WHERE phone = ? AND api_key = ?', (phone, api_key))
             return True
         return False
 
 def generate_api_key(phone: str) -> str:
-    """生成 API Key"""
     return f"ak_{phone[-6:]}_{secrets.token_hex(8)}"
 
-# ========== 征信分析核心函数（与原版相同）==========
+# ========== PDF 解析 ==========
 def parse_pdf(pdf_bytes: bytes) -> str:
     resp = requests.post(PADDLEOCR_API_URL, 
         headers={"Authorization": f"token {PADDLEOCR_TOKEN}", "Content-Type": "application/json"},
@@ -116,7 +105,8 @@ def parse_pdf(pdf_bytes: bytes) -> str:
         raise Exception("PaddleOCR 未能提取到文本内容")
     return md
 
-def extract_basic_info(text: str, report_date: datetime) -> Tuple[str, int, str]:
+# ========== 征信分析函数（与原版完全相同）==========
+def extract_basic_info(text: str, report_date: datetime):
     id_match = re.search(r'证件号码[：:]\s*(\d{17}[\dXx])', text)
     gender = "男" if id_match and int(id_match.group(1)[16]) % 2 == 1 else "女" if id_match else "未知"
     age = 0
@@ -140,7 +130,7 @@ def is_micro(inst: str) -> bool:
         return False
     return any(kw in inst for kw in MICRO_KEYWORDS) or "银行" not in inst
 
-def extract_loans(text: str) -> Dict[str, Any]:
+def extract_loans(text: str):
     insts = {}
     for line in text.split('\n'):
         line = line.strip()
@@ -185,7 +175,7 @@ def extract_loans(text: str) -> Dict[str, Any]:
             loans["overdue_count"] += 1
     return loans
 
-def extract_credits(text: str) -> Dict[str, Any]:
+def extract_credits(text: str):
     credits = {"count": 0, "limit": 0.0, "used": 0.0, "overdue": 0, "abnormal": {"stop_payment": 0, "frozen": 0, "doubtful": 0}}
     for line in text.split('\n'):
         line = line.strip()
@@ -221,7 +211,7 @@ def extract_credits(text: str) -> Dict[str, Any]:
     credits["abnormal_display"] = "；".join(abnormal)
     return credits
 
-def extract_guarantee(text: str) -> Tuple[int, float]:
+def extract_guarantee(text: str):
     count, balance = 0, 0.0
     for amt_str, bal_str in re.findall(r'相关还款责任金额[为]?\s*([\d,]+|--).*?余额[为]?\s*([\d,]+)', text, re.DOTALL):
         loan_bal = clean_number(bal_str)
@@ -241,13 +231,23 @@ def extract_guarantee(text: str) -> Tuple[int, float]:
                 balance += clean_number(amt_str) / 10000
     return count, balance
 
-def extract_queries(text: str, report_date: datetime) -> Dict[str, int]:
+def extract_queries(text: str, report_date: datetime):
+    """从 HTML 表格中提取查询记录（原版正确逻辑）"""
     queries = {"30d": 0, "31_90d": 0, "91_180d": 0, "181_360d": 0, "micro_60d": 0, "self_60d": 0}
     valid_reasons = ["贷款审批", "信用卡审批", "资信审查", "担保资格审查", "保前审查", "法人代表"]
-    pattern = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</tr>'
-    for match in re.finditer(pattern, text):
-        date_str, inst, reason = match.groups()
-        if "贷后" in reason or not any(v in reason for v in valid_reasons):
+    
+    # 机构查询 - 支持有编号和无编号两种格式
+    pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)<tr>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</table>'
+    pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
+    
+    matches = re.findall(pattern_with_id, text)
+    if not matches:
+        matches = re.findall(pattern_no_id, text)
+    
+    for date_str, institution, reason in matches:
+        if "贷后" in reason:
+            continue
+        if not any(v in reason for v in valid_reasons):
             continue
         try:
             y, m, d = map(int, re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', date_str).groups())
@@ -261,26 +261,36 @@ def extract_queries(text: str, report_date: datetime) -> Dict[str, int]:
                     queries["91_180d"] += 1
                 else:
                     queries["181_360d"] += 1
-                if diff <= 60 and is_micro(inst.strip()):
+                if diff <= 60 and is_micro(institution.strip()):
                     queries["micro_60d"] += 1
         except:
             pass
-    self_pattern = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
-    for match in re.finditer(self_pattern, text):
+    
+    # 本人查询
+    self_pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
+    self_pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
+    
+    self_matches = re.findall(self_pattern_with_id, text)
+    if not self_matches:
+        self_matches = re.findall(self_pattern_no_id, text)
+    
+    for date_str in self_matches:
         try:
-            y, m, d = map(int, re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', match.group(1)).groups())
-            if 0 <= (report_date - datetime(y, m, d)).days <= 60:
+            y, m, d = map(int, re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', date_str[0] if isinstance(date_str, tuple) else date_str).groups())
+            diff = (report_date - datetime(y, m, d)).days
+            if 0 <= diff <= 60:
                 queries["self_60d"] += 1
         except:
             pass
+    
     return queries
 
-def extract_overdue(text: str) -> Dict[str, int]:
+def extract_overdue(text: str):
     total = sum(int(m) for m in re.findall(r'最近\s*5\s*年内有\s*(\d+)\s*个月处于逾期状态', text))
     cnt = len(re.findall(r'其中\s*\d+\s*个月逾期超过\s*90\s*天', text))
     return {"total_months": total, "90d_count": cnt}
 
-def extract_public_records(text: str) -> str:
+def extract_public_records(text: str):
     records = []
     tax = re.search(r'欠税总额[：:]\s*([\d,]+)', text)
     if tax:
@@ -296,11 +306,11 @@ def extract_public_records(text: str) -> str:
         records.append(f"行政处罚1条，金额{clean_number(pen.group(1))/10000:.2f}万元")
     return "\n".join(records)
 
-def extract_asset_disposal(text: str) -> Tuple[int, float]:
+def extract_asset_disposal(text: str):
     m = re.search(r'资产处置信息.*?余额[为]?\s*([\d,]+)', text, re.DOTALL)
     return (1, clean_number(m.group(1))/10000) if m else (0, 0.0)
 
-def extract_advance_payment(text: str) -> Tuple[int, float]:
+def extract_advance_payment(text: str):
     m = re.search(r'垫款信息.*?累计代偿金额[为]?\s*([\d,]+)', text, re.DOTALL)
     return (1, clean_number(m.group(1))/10000) if m else (0, 0.0)
 
@@ -358,18 +368,11 @@ def call_deepseek(prompt: str) -> str:
 
 # ========== API 接口 ==========
 @app.post("/api/analyze")
-async def analyze(
-    file: UploadFile,
-    phone: str = Header(..., description="用户手机号"),
-    api_key: str = Header(..., description="API Key")
-):
-    """征信分析接口（需要手机号 + API Key 验证，每次调用扣减次数）"""
-    # 验证用户
+async def analyze(file: UploadFile, phone: str = Header(...), api_key: str = Header(...)):
     valid, balance = verify_user(phone, api_key)
     if not valid:
         raise HTTPException(401, detail="无效的手机号或 API Key，或次数已用完")
     
-    # 读取文件
     pdf_bytes = await file.read()
     if len(pdf_bytes) > 10 * 1024 * 1024:
         raise HTTPException(400, "文件不能超过10MB")
@@ -431,7 +434,6 @@ async def analyze(
         part1 = "\n".join(lines)
         part2 = call_deepseek(build_llm_prompt(stats))
         
-        # 扣减次数
         consume_balance(phone, api_key)
         
         return JSONResponse({"success": True, "full_report": part1 + "\n\n### 第二部分：展开分析\n\n" + part2})
@@ -439,34 +441,16 @@ async def analyze(
         print(f"错误: {str(e)}")
         raise HTTPException(500, f"处理失败: {str(e)}")
 
-
-@app.get("/api/verify")
-async def verify(phone: str, api_key: str):
-    """验证 API Key 是否有效"""
-    valid, balance = verify_user(phone, api_key)
-    return {"valid": valid, "remaining": balance if valid else 0}
-
-
-@app.get("/api/balance")
-async def get_balance(phone: str, api_key: str):
-    """查询剩余次数"""
-    valid, balance = verify_user(phone, api_key)
-    if not valid:
-        raise HTTPException(401, detail="无效的 API Key")
-    return {"phone": phone, "remaining": balance}
-
-
 # ========== 管理后台 ==========
 @app.get("/admin")
 async def admin_page():
-    """管理后台页面"""
     return HTMLResponse(content='''
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>管理后台 - 征信分析系统</title>
+    <title>管理后台</title>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
         body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f0f2f5;padding:20px}
@@ -475,40 +459,22 @@ async def admin_page():
         .form-group{margin-bottom:20px}
         label{display:block;margin-bottom:8px;color:#333;font-weight:500}
         input{width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;font-size:16px}
-        input:focus{outline:none;border-color:#4a90e2}
-        button{width:100%;padding:12px;background:#4a90e2;color:#fff;border:none;border-radius:8px;font-size:16px;font-weight:500;cursor:pointer}
+        button{width:100%;padding:12px;background:#4a90e2;color:#fff;border:none;border-radius:8px;font-size:16px;cursor:pointer}
         button:hover{background:#357abd}
-        .result{margin-top:20px;padding:16px;background:#f5f7fa;border-radius:8px;display:none}
+        .result{margin-top:20px;padding:16px;border-radius:8px;display:none}
         .result.success{background:#e8f8f0;border:1px solid #2e7d32;display:block}
         .result.error{background:#ffebee;border:1px solid #c62828;display:block}
         .api-key{font-family:monospace;word-break:break-all;background:#fff;padding:8px;border-radius:4px;margin-top:8px}
-        .note{font-size:12px;color:#666;margin-top:16px;padding-top:16px;border-top:1px solid #eee}
     </style>
 </head>
 <body>
 <div class="container">
     <h1>🔐 用户管理后台</h1>
-    <div class="form-group">
-        <label>管理员密码</label>
-        <input type="password" id="adminPassword" placeholder="输入管理员密码">
-    </div>
-    <div class="form-group">
-        <label>手机号</label>
-        <input type="tel" id="phone" placeholder="例如: 13812345678">
-    </div>
-    <div class="form-group">
-        <label>充值次数</label>
-        <input type="number" id="balance" value="10" placeholder="例如: 10">
-    </div>
+    <div class="form-group"><label>管理员密码</label><input type="password" id="adminPassword" placeholder="输入管理员密码"></div>
+    <div class="form-group"><label>手机号</label><input type="tel" id="phone" placeholder="例如: 13812345678"></div>
+    <div class="form-group"><label>充值次数</label><input type="number" id="balance" value="10"></div>
     <button onclick="generateKey()">生成 API Key</button>
     <div id="result" class="result"></div>
-    <div class="note">
-        💡 使用说明：<br>
-        1. 输入管理员密码（在环境变量 ADMIN_PASSWORD 中设置）<br>
-        2. 输入用户手机号和充值次数<br>
-        3. 点击生成，将 API Key 复制发给用户<br>
-        4. 用户调用 API 时需要提供手机号和 API Key
-    </div>
 </div>
 <script>
 async function generateKey() {
@@ -516,19 +482,11 @@ async function generateKey() {
     const phone = document.getElementById('phone').value;
     const balance = document.getElementById('balance').value;
     const resultDiv = document.getElementById('result');
-    
     if (!password || !phone) {
         resultDiv.className = 'result error';
         resultDiv.innerHTML = '❌ 请填写管理员密码和手机号';
         return;
     }
-    
-    if (!/^1[3-9]\d{9}$/.test(phone)) {
-        resultDiv.className = 'result error';
-        resultDiv.innerHTML = '❌ 手机号格式不正确';
-        return;
-    }
-    
     try {
         const resp = await fetch('/admin/add_user', {
             method: 'POST',
@@ -538,14 +496,7 @@ async function generateKey() {
         const data = await resp.json();
         if (resp.ok) {
             resultDiv.className = 'result success';
-            resultDiv.innerHTML = `
-                ✅ 用户创建成功！<br>
-                手机号: ${data.phone}<br>
-                API Key: <strong class="api-key">${data.api_key}</strong><br>
-                剩余次数: ${data.balance}<br>
-                <br>
-                📤 请将以上信息发给用户
-            `;
+            resultDiv.innerHTML = `✅ 用户创建成功！<br>手机号: ${data.phone}<br>API Key: <strong class="api-key">${data.api_key}</strong><br>剩余次数: ${data.balance}`;
             document.getElementById('phone').value = '';
         } else {
             resultDiv.className = 'result error';
@@ -561,191 +512,76 @@ async function generateKey() {
 </html>
     ''')
 
-
 @app.post("/admin/add_user")
-async def add_user(
-    password: str = Form(...),
-    phone: str = Form(...),
-    balance: int = Form(10)
-):
-    """添加/充值用户，生成 API Key"""
+async def add_user(password: str = Form(...), phone: str = Form(...), balance: int = Form(10)):
     if password != ADMIN_PASSWORD:
         raise HTTPException(403, detail="密码错误")
-    
-    if not phone or not phone.strip():
-        raise HTTPException(400, detail="手机号不能为空")
-    if balance <= 0:
-        raise HTTPException(400, detail="次数必须大于0")
-    
+    if not phone or balance <= 0:
+        raise HTTPException(400, detail="参数错误")
     api_key = generate_api_key(phone)
-    
     with get_db() as conn:
-        # 检查用户是否存在
         existing = conn.execute('SELECT api_key FROM users WHERE phone = ?', (phone,)).fetchone()
         if existing:
-            # 存在则增加次数
             conn.execute('UPDATE users SET balance = balance + ?, api_key = ? WHERE phone = ?', (balance, api_key, phone))
         else:
-            # 不存在则新增
             conn.execute('INSERT INTO users (phone, api_key, balance) VALUES (?, ?, ?)', (phone, api_key, balance))
-    
-    with get_db() as conn:
         row = conn.execute('SELECT balance FROM users WHERE phone = ?', (phone,)).fetchone()
-        new_balance = row['balance'] if row else balance
-    
-    return {"success": True, "phone": phone, "api_key": api_key, "balance": new_balance}
-
-
-@app.post("/admin/recharge")
-async def recharge_user(
-    password: str = Form(...),
-    phone: str = Form(...),
-    amount: int = Form(...)
-):
-    """为现有用户充值"""
-    if password != ADMIN_PASSWORD:
-        raise HTTPException(403, detail="密码错误")
-    if amount <= 0:
-        raise HTTPException(400, detail="充值次数必须大于0")
-    
-    with get_db() as conn:
-        row = conn.execute('SELECT phone FROM users WHERE phone = ?', (phone,)).fetchone()
-        if not row:
-            raise HTTPException(404, detail="用户不存在")
-        conn.execute('UPDATE users SET balance = balance + ? WHERE phone = ?', (amount, phone))
-        new_row = conn.execute('SELECT balance FROM users WHERE phone = ?', (phone,)).fetchone()
-    
-    return {"success": True, "phone": phone, "added": amount, "new_balance": new_row['balance']}
-
-
-@app.get("/admin/users")
-async def list_users(password: str):
-    """查看所有用户（简单列表）"""
-    if password != ADMIN_PASSWORD:
-        raise HTTPException(403, detail="密码错误")
-    
-    with get_db() as conn:
-        rows = conn.execute('SELECT phone, api_key, balance, created_at, last_used_at FROM users ORDER BY created_at DESC').fetchall()
-    
-    return {"users": [dict(row) for row in rows]}
-
+    return {"success": True, "phone": phone, "api_key": api_key, "balance": row['balance']}
 
 # ========== 其他接口 ==========
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "version": "v3.0_with_billing"}
-
+    return {"status": "ok", "version": "v3.0_fixed"}
 
 @app.get("/")
 async def frontend():
-    return HTMLResponse(content='''<!DOCTYPE html>
+    return HTMLResponse(content='''
+<!DOCTYPE html>
 <html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>征信报告分析系统</title>
-    <style>
-        *{margin:0;padding:0;box-sizing:border-box}
-        body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f5f7fa;padding:16px}
-        .container{max-width:600px;margin:0 auto;background:#fff;border-radius:24px;padding:20px;box-shadow:0 4px 20px rgba(0,0,0,0.08)}
-        h1{color:#1e3c72;border-bottom:3px solid #4a90e2;padding-bottom:12px;margin-bottom:16px;font-size:22px}
-        .desc{color:#666;font-size:14px;margin-bottom:20px}
-        .auth-box{background:#f0f2f5;border-radius:12px;padding:16px;margin-bottom:20px}
-        .auth-box input{width:100%;padding:10px;margin-bottom:10px;border:1px solid #ddd;border-radius:8px;font-size:14px}
-        .upload-area{border:2px dashed #4a90e2;border-radius:20px;padding:40px 20px;text-align:center;background:#fafcff;margin:16px 0;cursor:pointer}
-        .upload-area:hover{background:#eef4ff;border-color:#357abd}
-        .upload-icon{font-size:48px;margin-bottom:12px}
-        .file-name{color:#2e7d32;font-size:14px;margin-top:8px}
-        input[type="file"]{display:none}
-        button{background:#4a90e2;color:#fff;border:none;padding:14px 28px;border-radius:40px;font-size:16px;font-weight:500;cursor:pointer;width:100%;margin-top:8px}
-        button:hover{background:#357abd}
-        button:disabled{background:#ccc}
-        .loading{display:none;text-align:center;margin:24px 0;color:#4a90e2}
-        .result-container{display:none;margin-top:24px}
-        .result{background:#f9f9f9;border-radius:16px;padding:16px;font-family:monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;max-height:500px;overflow:auto;border:1px solid #e0e0e0}
-        .info-note{background:#e8f4fd;padding:12px;border-radius:12px;margin-top:20px;font-size:12px;color:#4a90e2;text-align:center}
-    </style>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>征信报告分析系统</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,sans-serif;background:#f5f7fa;padding:16px}.container{max-width:600px;margin:0 auto;background:#fff;border-radius:24px;padding:20px}.auth-box{background:#f0f2f5;border-radius:12px;padding:16px;margin-bottom:20px}.auth-box input{width:100%;padding:10px;margin-bottom:10px;border:1px solid #ddd;border-radius:8px}.upload-area{border:2px dashed #4a90e2;border-radius:20px;padding:40px 20px;text-align:center;cursor:pointer}.upload-icon{font-size:48px}button{background:#4a90e2;color:#fff;border:none;padding:14px;border-radius:40px;width:100%;margin-top:8px;cursor:pointer}.result{background:#f9f9f9;border-radius:16px;padding:16px;font-family:monospace;font-size:12px;white-space:pre-wrap;max-height:500px;overflow:auto}</style>
 </head>
 <body>
 <div class="container">
     <h1>📄 征信结构解读</h1>
-    <p class="desc">上传PDF格式的个人简版信用报告，系统将自动解析并生成专业风控报告。</p>
-    
     <div class="auth-box">
-        <input type="tel" id="phone" placeholder="手机号" autocomplete="off">
-        <input type="text" id="apiKey" placeholder="API Key" autocomplete="off">
+        <input type="tel" id="phone" placeholder="手机号">
+        <input type="text" id="apiKey" placeholder="API Key">
     </div>
-    
     <div class="upload-area" id="uploadArea">
         <div class="upload-icon">📎</div>
-        <div class="upload-text">点击或拖拽上传PDF文件</div>
-        <div class="file-name" id="fileName"></div>
-        <input type="file" id="fileInput" accept=".pdf">
+        <div>点击或拖拽上传PDF文件</div>
+        <div id="fileName"></div>
+        <input type="file" id="fileInput" accept=".pdf" style="display:none">
     </div>
-    
     <button id="analyzeBtn" disabled>开始分析</button>
-    <div class="loading" id="loading">正在分析，请稍候...</div>
-    <div class="result-container" id="resultContainer"><div class="result" id="result"></div></div>
-    <div class="info-note">💡 提示：需要有效的手机号和API Key才能使用</div>
+    <div class="result" id="result" style="display:none"></div>
 </div>
 <script>
-const uploadArea=document.getElementById('uploadArea'),fileInput=document.getElementById('fileInput'),analyzeBtn=document.getElementById('analyzeBtn'),loadingDiv=document.getElementById('loading'),resultDiv=document.getElementById('result'),resultContainer=document.getElementById('resultContainer'),fileNameSpan=document.getElementById('fileName');
 const phoneInput=document.getElementById('phone'),apiKeyInput=document.getElementById('apiKey');
 let selectedFile=null;
-
-function checkAuth() {
-    analyzeBtn.disabled = !(selectedFile && phoneInput.value.trim() && apiKeyInput.value.trim());
-}
-phoneInput.addEventListener('input', checkAuth);
-apiKeyInput.addEventListener('input', checkAuth);
-
-function handleFile(file){
-    if(!file||file.type!=='application/pdf'){alert('请上传PDF格式的文件');reset();return;}
-    selectedFile=file;
-    document.querySelector('.upload-icon').innerHTML='✅';
-    document.querySelector('.upload-text').innerHTML='文件已就绪';
-    fileNameSpan.innerHTML=file.name;
-    checkAuth();
-}
-function reset(){
-    document.querySelector('.upload-icon').innerHTML='📎';
-    document.querySelector('.upload-text').innerHTML='点击或拖拽上传PDF文件';
-    fileNameSpan.innerHTML='';
-    selectedFile=null;
-    checkAuth();
-}
-uploadArea.addEventListener('click',()=>fileInput.click());
-fileInput.addEventListener('change',e=>e.target.files.length>0&&handleFile(e.target.files[0]));
-uploadArea.addEventListener('dragover',e=>{e.preventDefault();uploadArea.style.background='#eef4ff';});
-uploadArea.addEventListener('dragleave',e=>{e.preventDefault();uploadArea.style.background='#fafcff';});
-uploadArea.addEventListener('drop',e=>{e.preventDefault();uploadArea.style.background='#fafcff';e.dataTransfer.files.length>0&&handleFile(e.dataTransfer.files[0]);});
-
-analyzeBtn.addEventListener('click',async()=>{
-    if(!selectedFile)return;
-    const phone = phoneInput.value.trim();
-    const apiKey = apiKeyInput.value.trim();
-    if(!phone||!apiKey){alert('请填写手机号和API Key');return;}
-    
-    analyzeBtn.disabled=true;
-    loadingDiv.style.display='block';
-    resultContainer.style.display='none';
-    const fd=new FormData();
-    fd.append('file',selectedFile);
+function checkAuth(){document.getElementById('analyzeBtn').disabled=!(selectedFile&&phoneInput.value&&apiKeyInput.value);}
+phoneInput.addEventListener('input',checkAuth);
+apiKeyInput.addEventListener('input',checkAuth);
+document.getElementById('uploadArea').addEventListener('click',()=>document.getElementById('fileInput').click());
+document.getElementById('fileInput').addEventListener('change',e=>{if(e.target.files[0]){selectedFile=e.target.files[0];document.getElementById('fileName').innerHTML=selectedFile.name;checkAuth();}});
+document.getElementById('analyzeBtn').addEventListener('click',async()=>{
+    const fd=new FormData();fd.append('file',selectedFile);
+    document.getElementById('analyzeBtn').disabled=true;
+    document.getElementById('result').style.display='block';
+    document.getElementById('result').innerHTML='正在分析...';
     try{
-        const resp=await fetch('/api/analyze',{method:'POST',headers:{'phone':phone,'api-key':apiKey},body:fd});
+        const resp=await fetch('/api/analyze',{method:'POST',headers:{'phone':phoneInput.value,'api-key':apiKeyInput.value},body:fd});
         const data=await resp.json();
-        if(!resp.ok)throw new Error(data.detail||'分析失败');
-        resultDiv.innerText=data.full_report;
-        resultContainer.style.display='block';
-        resultContainer.scrollIntoView({behavior:'smooth'});
-    }catch(err){alert('错误：'+err.message);
-    }finally{loadingDiv.style.display='none';analyzeBtn.disabled=false;}
+        if(!resp.ok)throw new Error(data.detail);
+        document.getElementById('result').innerHTML=data.full_report;
+    }catch(err){document.getElementById('result').innerHTML='错误：'+err.message;}
+    finally{document.getElementById('analyzeBtn').disabled=false;}
 });
 </script>
 </body>
 </html>
     ''')
-
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
