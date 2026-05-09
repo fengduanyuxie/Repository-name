@@ -1,15 +1,16 @@
 # main.py
-# 征信报告分析系统 - MongoDB 外部数据库版（带用户管理页面 + 修复版）
+# 征信报告分析系统 - MongoDB + JWT 安全认证版
 
 import os
 import re
 import base64
 import secrets
-from datetime import datetime
-from typing import Dict, Any, Tuple, List
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Header
-from fastapi.responses import HTMLResponse, JSONResponse
+from datetime import datetime, timedelta
+from typing import Dict, Any, Tuple, List, Optional
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Header, Depends, Cookie
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from jose import JWTError, jwt
 import requests
 import uvicorn
 from pymongo import MongoClient
@@ -22,9 +23,17 @@ DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 PADDLEOCR_API_URL = os.environ.get("PADDLEOCR_API_URL", "https://7ez8g52bxbp3t2m2.aistudio-app.com/layout-parsing")
 PADDLEOCR_TOKEN = os.environ.get("PADDLEOCR_TOKEN", "")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 
-# MongoDB 配置（从环境变量读取）
+# JWT 配置
+SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "")
+if not SECRET_KEY:
+    SECRET_KEY = secrets.token_urlsafe(32)
+    print(f"警告: JWT_SECRET_KEY 未设置，已自动生成: {SECRET_KEY}")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7天
+
+# MongoDB 配置
 MONGO_URI = os.environ.get("MONGO_URI", "")
 MONGO_DB = os.environ.get("MONGO_DB", "credit_report")
 
@@ -44,11 +53,41 @@ if MONGO_URI:
     except Exception as e:
         print(f"MongoDB 连接失败: {e}")
 else:
-    print("警告: MONGO_URI 未设置，系统将无法使用数据库")
+    print("警告: MONGO_URI 未设置")
+
+# ========== JWT 函数 ==========
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+def verify_admin_token(token: str) -> bool:
+    """验证管理员 Token"""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload.get("role") == "admin"
+    except JWTError:
+        return False
+
+def get_admin_from_token(token: str = Cookie(None)) -> Dict:
+    """从 Cookie 中获取管理员信息"""
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("role") == "admin":
+            return {"username": payload.get("sub"), "exp": payload.get("exp")}
+    except JWTError:
+        pass
+    return None
 
 # ========== 数据库操作函数 ==========
 def verify_user(phone: str, api_key: str):
-    """验证用户，返回 (是否有效, 剩余次数)"""
     if users_collection is None:
         return False, 0
     user = users_collection.find_one({"phone": phone, "api_key": api_key})
@@ -57,7 +96,6 @@ def verify_user(phone: str, api_key: str):
     return False, 0
 
 def consume_balance(phone: str, api_key: str) -> bool:
-    """扣减一次使用次数"""
     if users_collection is None:
         return False
     result = users_collection.update_one(
@@ -67,11 +105,9 @@ def consume_balance(phone: str, api_key: str) -> bool:
     return result.modified_count > 0
 
 def generate_api_key(phone: str) -> str:
-    """生成 API Key"""
     return f"ak_{phone[-6:]}_{secrets.token_hex(8)}"
 
 def add_or_recharge_user(phone: str, balance: int) -> Tuple[str, int]:
-    """添加或充值用户，返回 (api_key, 新余额)"""
     api_key = generate_api_key(phone)
     result = users_collection.update_one(
         {"phone": phone},
@@ -86,21 +122,18 @@ def add_or_recharge_user(phone: str, balance: int) -> Tuple[str, int]:
         return user["api_key"], user["balance"] + balance
 
 def delete_user(phone: str) -> bool:
-    """删除用户"""
     if users_collection is None:
         return False
     result = users_collection.delete_one({"phone": phone})
     return result.deleted_count > 0
 
-def get_all_users() -> List[Dict]:
-    """获取所有用户"""
+def get_all_users():
     if users_collection is None:
         return []
     users = list(users_collection.find({}, {"_id": 0}).sort("created_at", -1))
     return users
 
-def get_user_by_phone(phone: str) -> Dict:
-    """根据手机号获取用户"""
+def get_user_by_phone(phone: str):
     if users_collection is None:
         return None
     return users_collection.find_one({"phone": phone}, {"_id": 0})
@@ -120,7 +153,6 @@ def clean_number(num: str) -> float:
     except:
         return 0.0
 
-# ========== PDF 解析 ==========
 def parse_pdf(pdf_bytes: bytes) -> str:
     resp = requests.post(PADDLEOCR_API_URL, 
         headers={"Authorization": f"token {PADDLEOCR_TOKEN}", "Content-Type": "application/json"},
@@ -138,7 +170,6 @@ def parse_pdf(pdf_bytes: bytes) -> str:
         raise Exception("PaddleOCR 未能提取到文本内容")
     return md
 
-# ========== 征信分析函数 ==========
 def extract_basic_info(text: str, report_date: datetime):
     id_match = re.search(r'证件号码[：:]\s*(\d{17}[\dXx])', text)
     gender = "男" if id_match and int(id_match.group(1)[16]) % 2 == 1 else "女" if id_match else "未知"
@@ -269,7 +300,7 @@ def extract_queries(text: str, report_date: datetime):
     valid_reasons = ["贷款审批", "信用卡审批", "资信审查", "担保资格审查", "保前审查", "法人代表"]
     
     pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
-    pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
+    pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</table>\s*<td[^>]*>([^<]+)</table>\s*<td[^>]*>([^<]+)</td>'
     
     matches = re.findall(pattern_with_id, text)
     if not matches:
@@ -402,7 +433,7 @@ def call_deepseek(prompt: str) -> str:
 @app.post("/api/analyze")
 async def analyze(file: UploadFile, phone: str = Header(...), api_key: str = Header(...)):
     if users_collection is None:
-        raise HTTPException(500, "数据库未连接，请检查 MONGO_URI 环境变量")
+        raise HTTPException(500, "数据库未连接")
     
     valid, balance = verify_user(phone, api_key)
     if not valid:
@@ -475,16 +506,16 @@ async def analyze(file: UploadFile, phone: str = Header(...), api_key: str = Hea
         print(f"错误: {str(e)}")
         raise HTTPException(500, f"处理失败: {str(e)}")
 
-# ========== 管理后台 API ==========
+# ========== 管理后台（JWT 安全认证）==========
 @app.get("/admin")
 async def admin_page():
-    """管理后台页面"""
+    """管理后台入口"""
     return HTMLResponse(content='''
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>管理后台 - 征信分析系统</title>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
@@ -493,98 +524,164 @@ async def admin_page():
         .card{background:#fff;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}
         h1{color:#1e3c72;margin-bottom:24px;border-bottom:2px solid #4a90e2;padding-bottom:12px}
         h2{color:#333;margin-bottom:16px;font-size:18px}
+        .login-box{max-width:400px;margin:100px auto}
         .form-group{margin-bottom:16px}
         label{display:block;margin-bottom:6px;color:#333;font-weight:500}
         input{width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px}
         button{padding:10px 20px;background:#4a90e2;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px}
         button:hover{background:#357abd}
-        button.danger{background:#dc3545}
-        button.danger:hover{background:#c82333}
+        .logout-btn{float:right;background:#6c757d;margin-bottom:16px}
+        .logout-btn:hover{background:#5a6268}
         .result{margin-top:16px;padding:12px;border-radius:8px;display:none}
         .result.success{background:#e8f8f0;border:1px solid #2e7d32;display:block}
         .result.error{background:#ffebee;border:1px solid #c62828;display:block}
-        .api-key{font-family:monospace;word-break:break-all;background:#f5f5f5;padding:8px;border-radius:4px;margin-top:8px}
+        .status-badge{padding:2px 8px;border-radius:20px;font-size:12px}
+        .status-connected{background:#d4edda;color:#155724}
+        .status-disconnected{background:#f8d7da;color:#721c24}
         table{width:100%;border-collapse:collapse;margin-top:16px}
         th,td{padding:12px;text-align:left;border-bottom:1px solid #eee}
         th{background:#f5f5f5;font-weight:600}
         .user-list{overflow-x:auto}
-        .status-badge{padding:2px 8px;border-radius:20px;font-size:12px}
-        .status-connected{background:#d4edda;color:#155724}
-        .status-disconnected{background:#f8d7da;color:#721c24}
-        .refresh-btn{float:right;background:#28a745;margin-bottom:16px}
-        .refresh-btn:hover{background:#218838}
         .actions button{padding:4px 12px;margin:0 4px;font-size:12px}
+        .danger{background:#dc3545}
+        .danger:hover{background:#c82333}
+        .refresh-btn{background:#28a745;float:right}
+        .refresh-btn:hover{background:#218838}
     </style>
 </head>
 <body>
-<div class="container">
-    <div class="card">
-        <h1>🔐 用户管理后台</h1>
-        
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-            <div id="dbStatus" class="status-badge status-connected">数据库: 检查中...</div>
-            <button onclick="loadUsers()" class="refresh-btn">🔄 刷新列表</button>
-        </div>
-        
-        <div class="user-list">
-            <h2>📋 用户列表</h2>
-            <div id="userTable">加载中...</div>
-        </div>
-    </div>
-    
-    <div class="card">
-        <h2>➕ 添加/充值用户</h2>
-        <div class="form-group">
-            <label>管理员密码</label>
-            <input type="password" id="adminPassword" placeholder="输入管理员密码">
-        </div>
-        <div class="form-group">
-            <label>手机号</label>
-            <input type="tel" id="phone" placeholder="例如: 13812345678">
-        </div>
-        <div class="form-group">
-            <label>充值次数</label>
-            <input type="number" id="balance" value="10">
-        </div>
-        <button onclick="addUser()">生成/充值 API Key</button>
-        <div id="addResult" class="result"></div>
-    </div>
-</div>
-
+<div id="app"></div>
 <script>
-let dbStatus = 'unknown';
+// 检查是否已登录
+const token = localStorage.getItem('admin_token');
+if (token) {
+    showAdminPanel();
+} else {
+    showLoginPage();
+}
+
+function showLoginPage() {
+    document.getElementById('app').innerHTML = `
+        <div class="login-box">
+            <div class="card">
+                <h1>🔐 管理员登录</h1>
+                <div class="form-group">
+                    <label>管理员密码</label>
+                    <input type="password" id="password" placeholder="请输入管理员密码">
+                </div>
+                <button onclick="login()">登录</button>
+                <div id="loginResult" class="result"></div>
+            </div>
+        </div>
+    `;
+}
+
+async function login() {
+    const password = document.getElementById('password').value;
+    const resultDiv = document.getElementById('loginResult');
+    
+    if (!password) {
+        resultDiv.className = 'result error';
+        resultDiv.innerHTML = '❌ 请输入密码';
+        return;
+    }
+    
+    try {
+        const resp = await fetch('/admin/login', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: new URLSearchParams({password})
+        });
+        const data = await resp.json();
+        
+        if (resp.ok) {
+            localStorage.setItem('admin_token', data.token);
+            resultDiv.className = 'result success';
+            resultDiv.innerHTML = '✅ 登录成功，正在跳转...';
+            setTimeout(() => showAdminPanel(), 1000);
+        } else {
+            resultDiv.className = 'result error';
+            resultDiv.innerHTML = `❌ ${data.detail || '登录失败'}`;
+        }
+    } catch(err) {
+        resultDiv.className = 'result error';
+        resultDiv.innerHTML = `网络错误: ${err.message}`;
+    }
+}
+
+function logout() {
+    localStorage.removeItem('admin_token');
+    showLoginPage();
+}
+
+async function showAdminPanel() {
+    const token = localStorage.getItem('admin_token');
+    
+    document.getElementById('app').innerHTML = `
+        <div class="container">
+            <div class="card">
+                <h1>🔐 用户管理后台 <button class="logout-btn" onclick="logout()">退出登录</button></h1>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                    <div id="dbStatus" class="status-badge">数据库: 检查中...</div>
+                    <button onclick="loadUsers()" class="refresh-btn">🔄 刷新列表</button>
+                </div>
+                <div class="user-list">
+                    <h2>📋 用户列表</h2>
+                    <div id="userTable">加载中...</div>
+                </div>
+            </div>
+            <div class="card">
+                <h2>➕ 添加/充值用户</h2>
+                <div class="form-group">
+                    <label>手机号</label>
+                    <input type="tel" id="phone" placeholder="例如: 13812345678">
+                </div>
+                <div class="form-group">
+                    <label>充值次数</label>
+                    <input type="number" id="balance" value="10">
+                </div>
+                <button onclick="addUser()">生成/充值 API Key</button>
+                <div id="addResult" class="result"></div>
+            </div>
+        </div>
+    `;
+    
+    checkDbStatus();
+    loadUsers();
+}
 
 async function checkDbStatus() {
     try {
         const resp = await fetch('/api/health');
         const data = await resp.json();
         if (data.database === 'connected') {
-            dbStatus = 'connected';
             document.getElementById('dbStatus').innerHTML = '数据库: ✅ 已连接';
             document.getElementById('dbStatus').className = 'status-badge status-connected';
         } else {
-            dbStatus = 'disconnected';
             document.getElementById('dbStatus').innerHTML = '数据库: ❌ 未连接';
             document.getElementById('dbStatus').className = 'status-badge status-disconnected';
         }
     } catch(e) {
-        dbStatus = 'disconnected';
         document.getElementById('dbStatus').innerHTML = '数据库: ❌ 未连接';
         document.getElementById('dbStatus').className = 'status-badge status-disconnected';
     }
 }
 
 async function loadUsers() {
-    const password = prompt('请输入管理员密码查看用户列表:');
-    if (!password) return;
-    
+    const token = localStorage.getItem('admin_token');
     document.getElementById('userTable').innerHTML = '加载中...';
     
     try {
-        const resp = await fetch('/admin/users?password=' + encodeURIComponent(password));
+        const resp = await fetch('/admin/users', {
+            headers: {'Authorization': `Bearer ${token}`}
+        });
         const data = await resp.json();
         
         if (!resp.ok) {
+            if (resp.status === 401) {
+                logout();
+                return;
+            }
             document.getElementById('userTable').innerHTML = `<div class="result error">❌ ${data.detail || '加载失败'}</div>`;
             return;
         }
@@ -613,7 +710,7 @@ async function loadUsers() {
                     <td class="actions">
                         <button onclick="rechargeUser('${user.phone}')">充值</button>
                         <button onclick="deleteUser('${user.phone}')" class="danger">删除</button>
-                    </td>
+                     </td>
                 </tr>
             `;
         }
@@ -625,31 +722,35 @@ async function loadUsers() {
 }
 
 async function addUser() {
-    const password = document.getElementById('adminPassword').value;
+    const token = localStorage.getItem('admin_token');
     const phone = document.getElementById('phone').value;
     const balance = document.getElementById('balance').value;
     const resultDiv = document.getElementById('addResult');
     
-    if (!password || !phone) {
+    if (!phone) {
         resultDiv.className = 'result error';
-        resultDiv.innerHTML = '❌ 请填写管理员密码和手机号';
+        resultDiv.innerHTML = '❌ 请填写手机号';
         return;
     }
     
     try {
         const resp = await fetch('/admin/add_user', {
             method: 'POST',
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: new URLSearchParams({password, phone, balance})
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Authorization': `Bearer ${token}`
+            },
+            body: new URLSearchParams({phone, balance})
         });
         const data = await resp.json();
         
         if (resp.ok) {
             resultDiv.className = 'result success';
-            resultDiv.innerHTML = `✅ 操作成功！<br>手机号: ${data.phone}<br>API Key: <strong class="api-key">${data.api_key}</strong><br>剩余次数: ${data.balance}`;
+            resultDiv.innerHTML = `✅ 操作成功！<br>手机号: ${data.phone}<br>API Key: <strong style="font-family:monospace">${data.api_key}</strong><br>剩余次数: ${data.balance}`;
             document.getElementById('phone').value = '';
             loadUsers();
         } else {
+            if (resp.status === 401) logout();
             resultDiv.className = 'result error';
             resultDiv.innerHTML = `❌ ${data.detail || '操作失败'}`;
         }
@@ -660,17 +761,18 @@ async function addUser() {
 }
 
 async function rechargeUser(phone) {
-    const password = prompt('请输入管理员密码:');
-    if (!password) return;
-    
+    const token = localStorage.getItem('admin_token');
     const amount = prompt(`为用户 ${phone} 充值次数:`, '10');
     if (!amount) return;
     
     try {
         const resp = await fetch('/admin/recharge', {
             method: 'POST',
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: new URLSearchParams({password, phone, amount})
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Authorization': `Bearer ${token}`
+            },
+            body: new URLSearchParams({phone, amount})
         });
         const data = await resp.json();
         
@@ -678,6 +780,7 @@ async function rechargeUser(phone) {
             alert(`✅ 充值成功！用户 ${phone} 新余额: ${data.new_balance}`);
             loadUsers();
         } else {
+            if (resp.status === 401) logout();
             alert(`❌ ${data.detail || '充值失败'}`);
         }
     } catch(err) {
@@ -686,16 +789,17 @@ async function rechargeUser(phone) {
 }
 
 async function deleteUser(phone) {
-    const password = prompt('请输入管理员密码确认删除:');
-    if (!password) return;
-    
+    const token = localStorage.getItem('admin_token');
     if (!confirm(`确定要删除用户 ${phone} 吗？此操作不可恢复！`)) return;
     
     try {
         const resp = await fetch('/admin/delete_user', {
             method: 'POST',
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: new URLSearchParams({password, phone})
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Authorization': `Bearer ${token}`
+            },
+            body: new URLSearchParams({phone})
         });
         const data = await resp.json();
         
@@ -703,33 +807,59 @@ async function deleteUser(phone) {
             alert(`✅ 用户 ${phone} 已删除`);
             loadUsers();
         } else {
+            if (resp.status === 401) logout();
             alert(`❌ ${data.detail || '删除失败'}`);
         }
     } catch(err) {
         alert(`网络错误: ${err.message}`);
     }
 }
-
-checkDbStatus();
-loadUsers();
 </script>
 </body>
 </html>
     ''')
 
-@app.post("/admin/add_user")
-async def add_user(password: str = Form(...), phone: str = Form(...), balance: int = Form(10)):
+@app.post("/admin/login")
+async def admin_login(password: str = Form(...)):
+    """管理员登录，返回 JWT Token"""
     if password != ADMIN_PASSWORD:
-        raise HTTPException(403, detail="密码错误")
+        raise HTTPException(401, detail="密码错误")
+    
+    token = create_access_token(data={"sub": "admin", "role": "admin"})
+    return {"success": True, "token": token}
+
+def verify_admin_request(authorization: Optional[str] = Header(None)):
+    """验证管理员请求的 Token"""
+    if not authorization:
+        raise HTTPException(401, detail="缺少认证信息")
+    
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(401, detail="认证格式错误")
+    
+    token = authorization[7:]  # 去掉 "Bearer " 前缀
+    
+    if not verify_admin_token(token):
+        raise HTTPException(401, detail="Token 无效或已过期")
+    
+    return True
+
+@app.post("/admin/add_user")
+async def add_user(
+    phone: str = Form(...), 
+    balance: int = Form(10),
+    _: bool = Depends(verify_admin_request)
+):
     if not phone or balance <= 0:
         raise HTTPException(400, detail="参数错误")
     api_key, new_balance = add_or_recharge_user(phone, balance)
     return {"success": True, "phone": phone, "api_key": api_key, "balance": new_balance}
 
 @app.post("/admin/recharge")
-async def recharge_user(password: str = Form(...), phone: str = Form(...), amount: int = Form(...)):
-    if password != ADMIN_PASSWORD:
-        raise HTTPException(403, detail="密码错误")
+async def recharge_user(
+    phone: str = Form(...), 
+    amount: int = Form(...),
+    _: bool = Depends(verify_admin_request)
+):
     if amount <= 0:
         raise HTTPException(400, detail="充值次数必须大于0")
     
@@ -742,32 +872,28 @@ async def recharge_user(password: str = Form(...), phone: str = Form(...), amoun
     return {"success": True, "phone": phone, "added": amount, "new_balance": new_user["balance"]}
 
 @app.post("/admin/delete_user")
-async def admin_delete_user(password: str = Form(...), phone: str = Form(...)):
-    if password != ADMIN_PASSWORD:
-        raise HTTPException(403, detail="密码错误")
-    
+async def admin_delete_user(
+    phone: str = Form(...),
+    _: bool = Depends(verify_admin_request)
+):
     if delete_user(phone):
         return {"success": True, "phone": phone}
     else:
         raise HTTPException(404, detail="用户不存在或删除失败")
 
 @app.get("/admin/users")
-async def list_users(password: str):
-    if password != ADMIN_PASSWORD:
-        raise HTTPException(403, detail="密码错误")
-    
+async def list_users(_: bool = Depends(verify_admin_request)):
     users = get_all_users()
     return {"users": users}
 
+# ========== 其他接口 ==========
 @app.get("/api/verify")
 async def verify(phone: str, api_key: str):
-    """验证 API Key 是否有效"""
     valid, balance = verify_user(phone, api_key)
     return {"valid": valid, "remaining": balance if valid else 0}
 
 @app.get("/api/balance")
 async def get_balance(phone: str, api_key: str):
-    """查询剩余次数"""
     valid, balance = verify_user(phone, api_key)
     if not valid:
         raise HTTPException(401, detail="无效的 API Key")
@@ -776,7 +902,7 @@ async def get_balance(phone: str, api_key: str):
 @app.get("/api/health")
 async def health():
     db_status = "connected" if users_collection is not None else "disconnected"
-    return {"status": "ok", "version": "v5.0_admin_panel", "database": db_status}
+    return {"status": "ok", "version": "v6.0_jwt_auth", "database": db_status}
 
 @app.get("/")
 async def frontend():
