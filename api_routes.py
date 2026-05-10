@@ -35,12 +35,39 @@ async def analyze(
     try:
         md = credit_analysis.parse_pdf(pdf_bytes)
         stats, lines = credit_analysis.generate_report(md)
+        
+        # 调用 DeepSeek 生成分析内容
+        raw_prompt_response = credit_analysis.call_deepseek(credit_analysis.build_llm_prompt(stats))
+        
+        # 清理 DeepSeek 返回的内容：删除开头的提示语和多余的标题
+        cleaned_response = raw_prompt_response
+        
+        # 删除常见的开头提示语
+        remove_patterns = [
+            r'^好的[，,].*?[。：:\n]',
+            r'^收到.*?[。：:\n]',
+            r'^作为.*?专家[，,].*?[。：:\n]',
+            r'^---+\n',
+            r'^###?\s*征信分析报告.*?\n',
+            r'^###?\s*第二部分.*?\n',
+        ]
+        
+        for pattern in remove_patterns:
+            cleaned_response = re.sub(pattern, '', cleaned_response, flags=re.IGNORECASE | re.MULTILINE)
+        
+        # 删除开头的空行
+        cleaned_response = cleaned_response.lstrip('\n')
+        
+        # 构建报告：直接从"第一部分：简要汇总"开始
         part1 = "\n".join(lines)
-        part2 = credit_analysis.call_deepseek(credit_analysis.build_llm_prompt(stats))
+        
+        # 删除 part1 中可能存在的 "###" 前缀
+        part1 = re.sub(r'^###\s*', '', part1, flags=re.MULTILINE)
+        
+        # 组装最终报告
+        full_report = "温馨提示：\n请先将解读报告复制保存，以免丢失。\n\n" + part1 + "\n\n第二部分 结构分析\n\n" + cleaned_response
         
         database.consume_balance(phone, api_key)
-        
-        full_report = "温馨提示：\n请先将解读报告复制保存，以免丢失。\n\n" + part1 + "\n\n### 第二部分 结构分析\n\n" + part2
         
         return JSONResponse({"success": True, "full_report": full_report})
     except Exception as e:
