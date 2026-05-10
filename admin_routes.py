@@ -33,7 +33,7 @@ async def admin_page():
         .result.error{background:#ffebee;border:1px solid #c62828;display:block}
         table{width:100%;border-collapse:collapse;margin-top:16px}
         th,td{padding:12px;text-align:left;border-bottom:1px solid #eee}
-        th{background:#f5f5f5}
+        th{background:#f5f5f5;font-weight:600}
         .actions button{padding:4px 12px;margin:0 4px;font-size:12px}
         .danger{background:#dc3545}
         .danger:hover{background:#c82333}
@@ -47,6 +47,7 @@ async def admin_page():
         .search-box button:hover{background:#138496}
         .clear-btn{background:#6c757d}
         .clear-btn:hover{background:#5a6268}
+        .api-key-cell{font-family:monospace;font-size:12px;word-break:break-all;max-width:300px}
     </style>
 </head>
 <body>
@@ -87,16 +88,24 @@ async function showAdminPanel() {
     const token = localStorage.getItem(tokenKey);
     document.getElementById('app').innerHTML = `
         <div class="container">
-            <div class="card"><h1>🔐 用户管理后台 <button class="logout-btn" onclick="logout()">退出</button></h1>
-            <h2>➕ 添加/充值用户</h2>
-            <div class="form-group"><label>手机号</label><input type="tel" id="phone" placeholder="13812345678"></div>
-            <div class="form-group"><label>次数</label><input type="number" id="balance" value="10"></div>
-            <button onclick="addUser()">生成/充值</button><div id="addResult" class="result"></div></div>
-            
-            <div class="card"><h2>📋 用户列表</h2>
-            <div class="search-box"><input type="text" id="searchInput" placeholder="输入手机号搜索..."><button onclick="searchUser()">🔍 搜索</button><button onclick="clearSearch()" class="clear-btn">清除</button></div>
-            <div><button onclick="loadUsers()" class="refresh-btn">🔄 刷新</button></div>
-            <div id="userTable">加载中...</div></div>
+            <div class="card">
+                <h1>🔐 用户管理后台 <button class="logout-btn" onclick="logout()">退出登录</button></h1>
+                <h2>➕ 添加/充值用户</h2>
+                <div class="form-group"><label>手机号</label><input type="tel" id="phone" placeholder="13812345678"></div>
+                <div class="form-group"><label>次数</label><input type="number" id="balance" value="10"></div>
+                <button onclick="addUser()">生成/充值</button>
+                <div id="addResult" class="result"></div>
+            </div>
+            <div class="card">
+                <h2>📋 用户列表</h2>
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="输入手机号搜索...">
+                    <button onclick="searchUser()">🔍 搜索</button>
+                    <button onclick="clearSearch()" class="clear-btn">清除</button>
+                    <button onclick="loadUsers()" class="refresh-btn" style="float:none; margin:0">🔄 刷新</button>
+                </div>
+                <div id="userTable">加载中...</div>
+            </div>
         </div>`;
     loadUsers();
 }
@@ -119,16 +128,46 @@ async function loadUsers() {
 
 function renderUserList(users) {
     const tableDiv = document.getElementById('userTable');
-    if (users.length === 0) { tableDiv.innerHTML = '<div style="padding:20px;text-align:center">暂无用户</div>'; return; }
-    let html = '<td><thead><tr><th>手机号</th><th>API Key</th><th>剩余次数</th><th>创建时间</th><th>最后使用</th><th>操作</th></tr></thead><tbody>';
+    if (!users || users.length === 0) { 
+        tableDiv.innerHTML = '<div style="padding:20px;text-align:center;color:#666;">暂无用户</div>'; 
+        return; 
+    }
+    let html = '<table style="width:100%;border-collapse:collapse;">';
+    html += '<thead><tr>' +
+            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">手机号</th>' +
+            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">API Key</th>' +
+            '<th style="padding:12px;text-align:center;border-bottom:1px solid #eee;background:#f5f5f5;">剩余次数</th>' +
+            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">创建时间</th>' +
+            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">最后使用</th>' +
+            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">操作</th>' +
+            '</tr></thead><tbody>';
     for (const u of users) {
-        html += `<tr><td>${u.phone}</td><td style="font-size:12px">${u.api_key}</td><td style="font-weight:bold">${u.balance}</td>
-                <td>${u.created_at ? new Date(u.created_at).toLocaleString() : '-'}</td>
-                <td>${u.last_used_at ? new Date(u.last_used_at).toLocaleString() : '未使用'}</td>
-                <td><button onclick="recharge('${u.phone}')">充值</button><button class="danger" onclick="del('${u.phone}')">删除</button></td></tr>`;
+        const created = u.created_at ? new Date(u.created_at).toLocaleString('zh-CN') : '-';
+        const lastUsed = u.last_used_at ? new Date(u.last_used_at).toLocaleString('zh-CN') : '未使用';
+        html += `<tr>
+            <td style="padding:12px;border-bottom:1px solid #eee;">${escapeHtml(u.phone)}</td>
+            <td style="padding:12px;border-bottom:1px solid #eee;font-family:monospace;font-size:12px;word-break:break-all;max-width:300px;">${escapeHtml(u.api_key)}</td>
+            <td style="padding:12px;border-bottom:1px solid #eee;text-align:center;font-weight:bold;">${u.balance}</td>
+            <td style="padding:12px;border-bottom:1px solid #eee;">${created}</td>
+            <td style="padding:12px;border-bottom:1px solid #eee;">${lastUsed}</td>
+            <td style="padding:12px;border-bottom:1px solid #eee;">
+                <button onclick="recharge('${escapeHtml(u.phone)}')" style="padding:4px 12px;margin:0 4px;background:#4a90e2;color:#fff;border:none;border-radius:6px;cursor:pointer;">充值</button>
+                <button onclick="del('${escapeHtml(u.phone)}')" style="padding:4px 12px;margin:0 4px;background:#dc3545;color:#fff;border:none;border-radius:6px;cursor:pointer;">删除</button>
+            </td>
+        </tr>`;
     }
     html += '</tbody></table>';
     tableDiv.innerHTML = html;
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/[&<>]/g, function(m) {
+        if (m === '&') return '&amp;';
+        if (m === '<') return '&lt;';
+        if (m === '>') return '&gt;';
+        return m;
+    });
 }
 
 function searchUser() {
@@ -137,7 +176,7 @@ function searchUser() {
         renderUserList(allUsers);
         return;
     }
-    const filtered = allUsers.filter(u => u.phone.toLowerCase().includes(keyword));
+    const filtered = allUsers.filter(u => u.phone && u.phone.toLowerCase().includes(keyword));
     renderUserList(filtered);
 }
 
@@ -157,7 +196,7 @@ async function addUser() {
         const data = await resp.json();
         if (resp.ok) {
             resDiv.className='result success';
-            resDiv.innerHTML = `✅ 成功！<br>API Key: <strong>${data.api_key}</strong><br>剩余: ${data.balance}`;
+            resDiv.innerHTML = `✅ 成功！<br>手机号: ${data.phone}<br>API Key: <strong style="font-family:monospace;word-break:break-all;">${data.api_key}</strong><br>剩余次数: ${data.balance}`;
             document.getElementById('phone').value = '';
             loadUsers();
         } else { if (resp.status===401) logout(); resDiv.className='result error'; resDiv.innerHTML=`❌ ${data.detail}`; }
@@ -178,7 +217,7 @@ async function recharge(phone) {
 
 async function del(phone) {
     const token = localStorage.getItem(tokenKey);
-    if (!confirm(`确定删除 ${phone} 吗？`)) return;
+    if (!confirm(`确定删除用户 ${phone} 吗？`)) return;
     try {
         const resp = await fetch('/admin/delete_user', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded','Authorization':`Bearer ${token}`}, body:new URLSearchParams({phone}) });
         const data = await resp.json();

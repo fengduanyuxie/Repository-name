@@ -1,3 +1,6 @@
+# api_routes.py
+# API 路由
+
 from fastapi import APIRouter, File, UploadFile, HTTPException, Header
 from fastapi.responses import JSONResponse
 import database
@@ -26,7 +29,10 @@ async def analyze(file: UploadFile, phone: str = Header(...), api_key: str = Hea
         
         database.consume_balance(phone, api_key)
         
-        return JSONResponse({"success": True, "full_report": part1 + "\n\n### 第二部分：展开分析\n\n" + part2})
+        # 添加温馨提示，放在报告最前面
+        full_report = "温馨提示：\n请先将解读报告复制保存，以免丢失。\n\n" + part1 + "\n\n### 第二部分 结构分析\n\n" + part2
+        
+        return JSONResponse({"success": True, "full_report": full_report})
     except Exception as e:
         print(f"错误: {str(e)}")
         raise HTTPException(500, f"处理失败: {str(e)}")

@@ -35,7 +35,8 @@ async def frontend():
         body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f5f7fa;padding:16px}
         .container{max-width:600px;margin:0 auto;background:#fff;border-radius:24px;padding:20px;box-shadow:0 4px 20px rgba(0,0,0,0.08)}
         h1{color:#1e3c72;border-bottom:3px solid #4a90e2;padding-bottom:12px;margin-bottom:16px;font-size:22px}
-        h1 span{font-size:12px;color:#999;font-weight:normal;display:block;margin-top:4px}
+        .desc{color:#666;font-size:14px;margin-bottom:20px;line-height:1.6}
+        .desc strong{color:#1e3c72;font-weight:700}
         .auth-box{background:#f0f2f5;border-radius:12px;padding:16px;margin-bottom:20px}
         .auth-box input{width:100%;padding:10px;margin-bottom:10px;border:1px solid #ddd;border-radius:8px;font-size:14px}
         .upload-area{border:2px dashed #4a90e2;border-radius:20px;padding:40px 20px;text-align:center;cursor:pointer;margin:16px 0;transition:all 0.3s}
@@ -53,8 +54,8 @@ async def frontend():
 </head>
 <body>
 <div class="container">
-    <h1>📄 征信结构解读<span>限个人简版信用报告</span></h1>
-    <p class="desc" style="color:#666;font-size:14px;margin-bottom:20px">上传PDF格式的个人简版信用报告，系统将自动解析并生成专业风控报告。</p>
+    <h1>📄 征信结构解读</h1>
+    <p class="desc">上传PDF格式的个人<strong>简版</strong>信用报告，专业解读报告包含两部分 — 简要汇总 + 结构分析</p>
     
     <div class="auth-box">
         <input type="tel" id="phone" placeholder="手机号" autocomplete="off">
@@ -73,7 +74,7 @@ async def frontend():
     <div class="result-container" id="resultContainer">
         <div class="result" id="result"></div>
     </div>
-    <div class="info-note">💡 提示：分析结果包含两部分 — 简要汇总 + 展开分析。需要有效手机号和API Key。</div>
+    <div class="info-note">💡 提示：API Key获取请联系管理员（微信:DXNBZ579）</div>
 </div>
 
 <script>
