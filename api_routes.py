@@ -65,8 +65,8 @@ async def analyze(
         # 删除 part1 中可能存在的 "###" 前缀
         part1 = re.sub(r'^###\s*', '', part1, flags=re.MULTILINE)
         
-        # 组装最终报告
-        full_report = "温馨提示：\n请先将解读报告复制保存，以免丢失。\n\n" + part1 + "\n\n第二部分 结构分析\n\n" + cleaned_response
+        # 组装最终报告（直接置顶输出，无温馨提示）
+        full_report = part1 + "\n\n第二部分 结构分析\n\n" + cleaned_response
         
         database.consume_balance(phone, api_key)
         
