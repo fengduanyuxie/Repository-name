@@ -76,7 +76,7 @@ async def analyze(
         
         # 组装最终报告
         full_report = ("让您久等了，您的专属征信解读报告已生成，请查阅~\n\n" + 
-                       part1 + "\n\n【第二部分：结构分析】\n\n" + 
+                       "【第一部分：简要汇总】\n\n" + part1 + "\n\n【第二部分：结构分析】\n\n" + 
                        cleaned_response + 
                        "\n\n\n💡 如有任何疑问或建议，欢迎随时联系管理员（微信：DXNBZ579）")
         

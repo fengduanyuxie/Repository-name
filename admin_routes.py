@@ -178,7 +178,7 @@ function renderUserList(users) {
             '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">创建时间</th>' +
             '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">最后使用</th>' +
             '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">操作</th>' +
-            '</td></thead><tbody>';
+            '</tr></thead><tbody>';
     for (const u of users) {
         const created = u.created_at ? new Date(u.created_at).toLocaleString('zh-CN') : '-';
         const lastUsed = u.last_used_at ? new Date(u.last_used_at).toLocaleString('zh-CN') : '未使用';
@@ -191,7 +191,7 @@ function renderUserList(users) {
         });
         html += `<tr>
             <td style="padding:12px;border-bottom:1px solid #eee;">${escapedPhone}</td>
-            <td style="padding:12px;border-bottom:1px solid #eee;font-family:monospace;font-size:12px;word-break:break-all;max-width:300px;">${(u.api_key || '').substring(0, 30)}...</td>
+            <td style="padding:12px;border-bottom:1px solid #eee;font-family:monospace;font-size:12px;word-break:break-all;max-width:300px;">${u.api_key || ''}</td>
             <td style="padding:12px;border-bottom:1px solid #eee;text-align:center;font-weight:bold;">${u.balance || 0}</td>
             <td style="padding:12px;border-bottom:1px solid #eee;">${expireAt}</td>
             <td style="padding:12px;border-bottom:1px solid #eee;">${created}</td>
@@ -339,7 +339,7 @@ async function loadLogs() {
                 <td style="padding:8px;">${log.details || '-'}</td>
             </tr>`;
         }
-        html += '</tbody></table>';
+        html += '</tbody><table>';
         logDiv.innerHTML = html;
     } catch(e) { logDiv.innerHTML = `<div class="result error">加载失败: ${e.message}</div>`; }
 }

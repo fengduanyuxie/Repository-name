@@ -1,5 +1,5 @@
 # credit_analysis.py
-# 征信分析核心逻辑（精度优化版：先加后除，美化排版）
+# 征信分析核心逻辑（精度优化版：先加后除，美化排版，简洁评价）
 
 import re
 import base64
@@ -217,7 +217,7 @@ def extract_queries(text: str, report_date: datetime) -> Dict[str, int]:
     valid_reasons = ["贷款审批", "信用卡审批", "资信审查", "担保资格审查", "保前审查", "法人代表"]
     
     pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
-    pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
+    pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)<td>'
     
     matches = re.findall(pattern_with_id, text)
     if not matches:
@@ -245,8 +245,8 @@ def extract_queries(text: str, report_date: datetime) -> Dict[str, int]:
         except:
             pass
     
-    self_pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
-    self_pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
+    self_pattern_with_id = r'<td[^>]*>\d+</tr>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
+    self_pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</tr>\s*<td[^>]*>本人</tr>'
     
     self_matches = re.findall(self_pattern_with_id, text)
     if not self_matches:
@@ -347,7 +347,7 @@ def call_deepseek(prompt: str) -> str:
     return resp.json()["choices"][0]["message"]["content"]
 
 def generate_report(markdown_text: str) -> Tuple[Dict, list]:
-    """生成完整报告，返回 (stats, report_lines) - 美化版"""
+    """生成完整报告，返回 (stats, report_lines) - 美化版 + 简洁评价"""
     report_date = extract_report_date(markdown_text)
     gender, age, marriage = extract_basic_info(markdown_text, report_date)
     
@@ -388,11 +388,14 @@ def generate_report(markdown_text: str) -> Tuple[Dict, list]:
     lines.append(f"性别：{gender}")
     lines.append(f"年龄：{age}岁")
     lines.append(f"婚姻状况：{marriage}")
-    lines.append(f"风险预警：{risk_warn}")
+    if risk_warn == "无":
+        lines.append(f"风险预警：{risk_warn}")
+    else:
+        lines.append(f"🚨 风险预警：{risk_warn}")
     lines.append("")
     
-    # 2️⃣ 查询记录（近360天）
-    lines.append("2️⃣ 查询记录（近360天）")
+    # 2️⃣ 查询记录
+    lines.append("2️⃣ 查询记录")
     lines.append("时间范围      查询次数")
     lines.append("────────────────────")
     lines.append(f"30天内        {queries['30d']} 次")
@@ -400,9 +403,18 @@ def generate_report(markdown_text: str) -> Tuple[Dict, list]:
     lines.append(f"90–180天      {queries['91_180d']} 次")
     lines.append(f"180–360天     {queries['181_360d']} 次")
     lines.append("")
-    lines.append("🔍 特殊标记")
+    lines.append("📌 特殊标记")
     lines.append(f"60天内网贷查询：{queries['micro_60d']} 次")
     lines.append(f"60天内本人查询（本人临柜/网查）：{queries['self_60d']} 次")
+    lines.append("")
+    
+    # 查询记录简洁评价
+    if queries['micro_60d'] == 0:
+        lines.append("✓ 近60天无网贷查询记录，征信查询状况良好")
+    elif queries['micro_60d'] <= 2:
+        lines.append("📌 近60天网贷查询{}次，处于正常范围".format(queries['micro_60d']))
+    else:
+        lines.append("⚠️ 近60天网贷查询{}次，查询较为频繁，建议控制申请频率".format(queries['micro_60d']))
     lines.append("")
     
     # 3️⃣ 逾期记录（5年内）
@@ -421,20 +433,38 @@ def generate_report(markdown_text: str) -> Tuple[Dict, list]:
     lines.append(f"总贷款余额     {balance_yuan} 万元")
     lines.append("")
     lines.append("细分如下：")
+    
     if loans['car_count'] > 0:
         lines.append("🚗 车贷")
         lines.append(f"   机构数：{loans['car_count']} 家")
         lines.append(f"   余额：{car_balance_yuan} 万元")
+        if car_balance_yuan > 20:
+            lines.append("   📌 车贷余额较高")
+    
     if loans['micro_count'] > 0:
         lines.append("📱 网贷（非银行小额贷款）")
         lines.append(f"   机构数：{loans['micro_count']} 家")
         lines.append(f"   余额：{micro_balance_yuan} 万元")
-    if loans['micro_count'] >= 5:
-        lines.append("⚠️ 网贷机构数较多（{}家），可能影响银行综合评分".format(loans['micro_count']))
+        if loans['micro_count'] > 3:
+            lines.append("   ⚠️ 网贷机构数较多，可能影响银行综合评分")
+        elif loans['micro_count'] >= 2:
+            lines.append("   📌 网贷数量适中，建议逐步优化")
+    
     if loans['housing_count'] > 0:
         lines.append("🏠 房贷")
         lines.append(f"   机构数：{loans['housing_count']} 家")
         lines.append(f"   余额：{housing_balance_yuan} 万元")
+        lines.append("   ✓ 房贷属于优质负债，对信用评分有益")
+    
+    lines.append("")
+    
+    # 贷款总览简洁评价
+    if loans['count'] == 0:
+        lines.append("✓ 无贷款记录，信用记录较新")
+    elif loans['micro_count'] / loans['count'] > 0.5:
+        lines.append("📌 小网贷占比较高，建议优先考虑银行贷款")
+    else:
+        lines.append("✓ 贷款结构合理，继续保持")
     lines.append("")
     
     # 5️⃣ 信用卡使用情况
@@ -442,11 +472,27 @@ def generate_report(markdown_text: str) -> Tuple[Dict, list]:
     lines.append(f"发卡机构数：{credits['count']} 家")
     lines.append(f"总授信额度：{credit_limit_yuan} 万元")
     lines.append(f"已用额度：{credit_used_yuan} 万元")
-    lines.append(f"使用率：{credits['usage_rate']}%")
-    if credits['usage_rate'] > 100:
-        lines.append("⚠️ 使用率超过100%，存在超限情况")
-    elif credits['usage_rate'] > 80:
-        lines.append("⚠️ 使用率较高，建议适当降低")
+    rate = credits['usage_rate']
+    if rate < 50:
+        rate_icon = ""
+    elif rate >= 100:
+        rate_icon = " 🔴🔴"
+    elif rate > 70:
+        rate_icon = " 🔴"
+    else:
+        rate_icon = " 🟡"
+    lines.append(f"使用率：{rate}%{rate_icon}")
+    lines.append("")
+    
+    # 信用卡使用情况简洁评价
+    if credits['count'] == 0:
+        lines.append("✓ 无信用卡记录")
+    elif rate > 100:
+        lines.append("🔥 使用率超过100%，存在超限情况，建议尽快还款")
+    elif rate > 70:
+        lines.append("📌 使用率较高，建议控制消费")
+    else:
+        lines.append("✓ 信用卡使用状况良好")
     lines.append("")
     
     # 6️⃣ 担保信息
@@ -458,7 +504,7 @@ def generate_report(markdown_text: str) -> Tuple[Dict, list]:
     
     # 7️⃣ 公共记录
     if pub_rec:
-        lines.append("7️⃣ 公共记录")
+        lines.append("7️⃣ 公共记录 ⚠️")
         lines.append(pub_rec)
         lines.append("")
     
