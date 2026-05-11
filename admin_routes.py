@@ -1,3 +1,6 @@
+# admin_routes.py
+# 管理后台路由（含日志、统计图表）
+
 from fastapi import APIRouter, HTTPException, Depends, Form
 from fastapi.responses import HTMLResponse
 import database
@@ -55,6 +58,8 @@ async def admin_page():
         .tab.active{color:#4a90e2;border-bottom:2px solid #4a90e2}
         .tab-content{display:none}
         .tab-content.active{display:block}
+        .log-table{font-size:12px}
+        .log-table td{word-break:break-all}
     </style>
 </head>
 <body>
@@ -165,33 +170,40 @@ function renderUserList(users) {
         return; 
     }
     let html = '<table style="width:100%;border-collapse:collapse;">';
-    html += '<thead><tr><th>手机号</th><th>API Key</th><th>剩余次数</th><th>有效期</th><th>创建时间</th><th>最后使用</th><th>操作</th></tr></thead><tbody>';
+    html += '<thead><tr>' +
+            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">手机号</th>' +
+            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">API Key</th>' +
+            '<th style="padding:12px;text-align:center;border-bottom:1px solid #eee;background:#f5f5f5;">剩余次数</th>' +
+            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">有效期</th>' +
+            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">创建时间</th>' +
+            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">最后使用</th>' +
+            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">操作</th>' +
+            '</tr></thead><tbody>';
     for (const u of users) {
         const created = u.created_at ? new Date(u.created_at).toLocaleString('zh-CN') : '-';
         const lastUsed = u.last_used_at ? new Date(u.last_used_at).toLocaleString('zh-CN') : '未使用';
         const expireAt = u.expire_at ? new Date(u.expire_at).toLocaleString('zh-CN') : '永久';
+        const escapedPhone = u.phone.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        });
         html += `<tr>
-            <td>${escapeHtml(u.phone)}</td>
-            <td style="font-family:monospace;font-size:12px;word-break:break-all;max-width:300px;">${escapeHtml(u.api_key)}</td>
-            <td style="text-align:center;font-weight:bold;">${u.balance}</td>
-            <td>${expireAt}</td>
-            <td>${created}</td>
-            <td>${lastUsed}</td>
-            <td><button onclick="recharge('${escapeHtml(u.phone)}')">充值</button><button onclick="del('${escapeHtml(u.phone)}')" style="background:#dc3545">删除</button></td>
+            <td style="padding:12px;border-bottom:1px solid #eee;">${escapedPhone}</td>
+            <td style="padding:12px;border-bottom:1px solid #eee;font-family:monospace;font-size:12px;word-break:break-all;max-width:300px;">${escapedPhone}</td>
+            <td style="padding:12px;border-bottom:1px solid #eee;text-align:center;font-weight:bold;">${u.balance}</td>
+            <td style="padding:12px;border-bottom:1px solid #eee;">${expireAt}</td>
+            <td style="padding:12px;border-bottom:1px solid #eee;">${created}</td>
+            <td style="padding:12px;border-bottom:1px solid #eee;">${lastUsed}</td>
+            <td style="padding:12px;border-bottom:1px solid #eee;">
+                <button onclick="recharge('${escapedPhone}')" style="padding:4px 12px;margin:0 4px;background:#4a90e2;color:#fff;border:none;border-radius:6px;cursor:pointer;">充值</button>
+                <button onclick="del('${escapedPhone}')" style="padding:4px 12px;margin:0 4px;background:#dc3545;color:#fff;border:none;border-radius:6px;cursor:pointer;">删除</button>
+            </td>
         </tr>`;
     }
     html += '</tbody></table>';
     tableDiv.innerHTML = html;
-}
-
-function escapeHtml(str) {
-    if (!str) return '';
-    return str.replace(/[&<>]/g, function(m) {
-        if (m === '&') return '&amp;';
-        if (m === '<') return '&lt;';
-        if (m === '>') return '&gt;';
-        return m;
-    });
 }
 
 function searchUser() {
@@ -320,11 +332,11 @@ async function loadLogs() {
         for (const log of data.logs) {
             const time = log.created_at ? new Date(log.created_at).toLocaleString('zh-CN') : '-';
             html += `<tr>
-                <td>${time}</td>
-                <td>${escapeHtml(log.admin)}</td>
-                <td>${escapeHtml(log.action)}</td>
-                <td>${escapeHtml(log.target)}</td>
-                <td>${escapeHtml(log.details)}</td>
+                <td style="padding:8px;">${time}</td>
+                <td style="padding:8px;">${log.admin || '-'}</td>
+                <td style="padding:8px;">${log.action || '-'}</td>
+                <td style="padding:8px;">${log.target || '-'}</td>
+                <td style="padding:8px;">${log.details || '-'}</td>
             </tr>`;
         }
         html += '</tbody></table>';

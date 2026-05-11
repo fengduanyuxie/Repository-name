@@ -1,10 +1,11 @@
 # main.py
-# 征信报告分析系统 - 主入口（最终版）
+# 征信报告分析系统 - 主入口（模块化版本）
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 import uvicorn
+import os
 
 import database
 from api_routes import router as api_router
@@ -79,8 +80,8 @@ async def frontend():
         <div class="result-header">
             <span style="font-size:14px;font-weight:500;">📋 分析结果</span>
             <div>
-                <button id="copyBtn" style="display:none;background:#17a2b8">📋 复制报告</button>
-                <button id="exportBtn" style="display:none;background:#28a745">📁 导出TXT</button>
+                <button id="copyBtn" style="display:none;background:#17a2b8;width:auto;padding:8px 16px;">📋 复制报告</button>
+                <button id="exportBtn" style="display:none;background:#28a745;width:auto;padding:8px 16px;">📁 导出TXT</button>
             </div>
         </div>
         <div class="result" id="result"></div>

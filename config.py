@@ -1,3 +1,6 @@
+# config.py
+# 环境变量配置
+
 import os
 import secrets
 

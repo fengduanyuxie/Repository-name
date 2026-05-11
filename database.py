@@ -1,3 +1,6 @@
+# database.py
+# MongoDB 数据库操作（含日志、统计、有效期）
+
 from datetime import datetime, timedelta
 from typing import Dict, Any, Tuple, List, Optional
 from pymongo import MongoClient
@@ -35,6 +38,7 @@ def init_db():
         print(f"MongoDB 连接失败: {e}")
         return False
 
+# ========== 用户相关 ==========
 def verify_user(phone: str, api_key: str) -> tuple:
     """验证用户，返回 (是否有效, 剩余次数)"""
     if users_collection is None:
@@ -126,6 +130,7 @@ def get_user_stats():
     total_balance = result[0]["total_balance"] if result else 0
     return {"total": total, "total_balance": total_balance}
 
+# ========== 操作日志 ==========
 def add_admin_log(admin: str, action: str, target: str, details: str = ""):
     """添加管理员操作日志"""
     if logs_collection is None:
@@ -144,6 +149,7 @@ def get_admin_logs(limit: int = 100):
         return []
     return list(logs_collection.find({}, {"_id": 0}).sort("created_at", -1).limit(limit))
 
+# ========== 使用统计 ==========
 def get_usage_stats(days: int = 30):
     """获取使用统计"""
     if stats_collection is None:
