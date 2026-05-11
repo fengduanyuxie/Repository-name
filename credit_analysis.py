@@ -213,13 +213,13 @@ def extract_guarantee(text: str) -> Tuple[int, float]:
     return count, balance
 
 def extract_queries(text: str, report_date: datetime) -> Dict[str, int]:
-    """提取查询记录（机构查询 + 本人查询）"""
+    """提取查询记录（机构查询 + 本人查询）- 使用HTML表格匹配"""
     queries = {"30d": 0, "31_90d": 0, "91_180d": 0, "181_360d": 0, "micro_60d": 0, "self_60d": 0}
     valid_reasons = ["贷款审批", "信用卡审批", "资信审查", "担保资格审查", "保前审查", "法人代表"]
     
-    # ========== 机构查询（HTML表格格式）==========
-    pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)<td>\s*<td[^>]*>([^<]+)</td>'
-    pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
+    # ========== 机构查询 ==========
+    pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
+    pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</tr>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
     
     matches = re.findall(pattern_with_id, text)
     if not matches:
@@ -247,16 +247,18 @@ def extract_queries(text: str, report_date: datetime) -> Dict[str, int]:
         except:
             pass
     
-    # ========== 本人查询（纯文本格式，修复版）==========
-    # 匹配本人查询记录明细表格中的行
-    # 格式示例: "1      2025年05月13日   本人                            本人查询（互联网个人信用信息服务平台）"
-    self_pattern = r'(\d+)\s+(\d{4}年\d{1,2}月\d{1,2}日)\s+本人\s+(.+?)(?:\n|$)'
+    # ========== 本人查询 ==========
+    self_pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)<tr>\s*<td[^>]*>本人</td>'
+    self_pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
     
-    self_matches = re.findall(self_pattern, text)
+    self_matches = re.findall(self_pattern_with_id, text)
+    if not self_matches:
+        self_matches = re.findall(self_pattern_no_id, text)
     
-    for match in self_matches:
-        date_str = match[1]
+    for date_str in self_matches:
         try:
+            if isinstance(date_str, tuple):
+                date_str = date_str[0]
             y, m, d = map(int, re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', date_str).groups())
             diff = (report_date - datetime(y, m, d)).days
             if 0 <= diff <= 60:
