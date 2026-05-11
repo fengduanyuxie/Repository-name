@@ -11,10 +11,19 @@ import auth
 router = APIRouter(tags=["api"])
 
 def is_simple_credit_report(text: str) -> bool:
-    """检查是否为简版征信报告"""
-    has_credit_report = "个人信用报告" in text
-    has_simple_version = "简版" in text
-    return has_credit_report and has_simple_version
+    """
+    识别是否为个人简版征信报告
+    识别逻辑：包含"个人信用报告" + 不包含"五级分类"
+    """
+    # 必须包含"个人信用报告"
+    if "个人信用报告" not in text:
+        return False
+    
+    # 不能包含"五级分类"（详细版才有）
+    if "五级分类" in text:
+        return False
+    
+    return True
 
 @router.post("/api/analyze")
 async def analyze(
