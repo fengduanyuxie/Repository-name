@@ -55,8 +55,6 @@ async def admin_page():
         .tab.active{color:#4a90e2;border-bottom:2px solid #4a90e2}
         .tab-content{display:none}
         .tab-content.active{display:block}
-        .log-table{font-size:12px}
-        .log-table td{word-break:break-all}
     </style>
 </head>
 <body>
@@ -167,9 +165,7 @@ function renderUserList(users) {
         return; 
     }
     let html = '<table style="width:100%;border-collapse:collapse;">';
-    html += '<thead><tr>' +
-            '<th>手机号</th><th>API Key</th><th>剩余次数</th><th>有效期</th><th>创建时间</th><th>最后使用</th><th>操作</th>' +
-            '</tr></thead><tbody>';
+    html += '<thead><tr><th>手机号</th><th>API Key</th><th>剩余次数</th><th>有效期</th><th>创建时间</th><th>最后使用</th><th>操作</th></tr></thead><tbody>';
     for (const u of users) {
         const created = u.created_at ? new Date(u.created_at).toLocaleString('zh-CN') : '-';
         const lastUsed = u.last_used_at ? new Date(u.last_used_at).toLocaleString('zh-CN') : '未使用';
@@ -181,10 +177,7 @@ function renderUserList(users) {
             <td>${expireAt}</td>
             <td>${created}</td>
             <td>${lastUsed}</td>
-            <td>
-                <button onclick="recharge('${escapeHtml(u.phone)}')">充值</button>
-                <button onclick="del('${escapeHtml(u.phone)}')" style="background:#dc3545">删除</button>
-            </td>
+            <td><button onclick="recharge('${escapeHtml(u.phone)}')">充值</button><button onclick="del('${escapeHtml(u.phone)}')" style="background:#dc3545">删除</button></td>
         </tr>`;
     }
     html += '</tbody></table>';

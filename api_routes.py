@@ -10,6 +10,12 @@ import auth
 
 router = APIRouter(tags=["api"])
 
+def is_simple_credit_report(text: str) -> bool:
+    """检查是否为简版征信报告"""
+    has_credit_report = "个人信用报告" in text
+    has_simple_version = "简版" in text
+    return has_credit_report and has_simple_version
+
 @router.post("/api/analyze")
 async def analyze(
     request: Request,
@@ -35,15 +41,19 @@ async def analyze(
     
     try:
         md = credit_analysis.parse_pdf(pdf_bytes)
+        
+        # 甄别是否为简版征信报告
+        if not is_simple_credit_report(md):
+            raise HTTPException(400, "请上传正确的个人简版信用报告，当前文件不是简版征信报告")
+        
         stats, lines = credit_analysis.generate_report(md)
         
         # 调用 DeepSeek 生成分析内容
         raw_prompt_response = credit_analysis.call_deepseek(credit_analysis.build_llm_prompt(stats))
         
-        # 清理 DeepSeek 返回的内容：删除开头的提示语和多余的标题
+        # 清理 DeepSeek 返回的内容
         cleaned_response = raw_prompt_response
         
-        # 删除常见的开头提示语
         remove_patterns = [
             r'^好的[，,].*?[。：:\n]',
             r'^收到.*?[。：:\n]',
@@ -56,21 +66,23 @@ async def analyze(
         for pattern in remove_patterns:
             cleaned_response = re.sub(pattern, '', cleaned_response, flags=re.IGNORECASE | re.MULTILINE)
         
-        # 删除开头的空行
         cleaned_response = cleaned_response.lstrip('\n')
         
-        # 构建报告：直接从"第一部分：简要汇总"开始
+        # 构建报告第一部分
         part1 = "\n".join(lines)
         
-        # 删除 part1 中可能存在的 "###" 前缀
-        part1 = re.sub(r'^###\s*', '', part1, flags=re.MULTILINE)
+        # 问候语
+        greeting = "让您久等了，您的专属征信解读报告已生成，请查阅~\n"
         
-        # 组装最终报告（直接置顶输出，无温馨提示）
-        full_report = part1 + "\n\n第二部分 结构分析\n\n" + cleaned_response
+        # 组装最终报告
+        full_report = greeting + "\n" + part1 + "\n\n" + cleaned_response + "\n\n---\n\n如有任何疑问或建议，欢迎联系管理员（微信：DXNBZ579）"
         
+        # 只有成功生成报告后才扣减次数
         database.consume_balance(phone, api_key)
         
         return JSONResponse({"success": True, "full_report": full_report})
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"错误: {str(e)}")
         raise HTTPException(500, f"处理失败: {str(e)}")
@@ -90,4 +102,4 @@ async def get_balance(phone: str, api_key: str):
 @router.get("/api/health")
 async def health():
     db_status = "connected" if database.users_collection is not None else "disconnected"
-    return {"status": "ok", "version": "v7.0_optimized", "database": db_status}
+    return {"status": "ok", "version": "v7.0_final", "database": db_status}

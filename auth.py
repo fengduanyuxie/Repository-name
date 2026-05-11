@@ -1,10 +1,9 @@
 from datetime import datetime, timedelta
 from typing import Optional, Dict
-from fastapi import HTTPException, Header, Request
+from fastapi import HTTPException, Header
 from jose import JWTError, jwt
 import config
 
-# 频率限制存储（简单内存存储，生产环境建议用Redis）
 rate_limit_store: Dict[str, list] = {}
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -37,20 +36,13 @@ def verify_admin_request(authorization: Optional[str] = Header(None)):
     return True
 
 def rate_limit(phone: str, limit: int = 10, window: int = 60) -> bool:
-    """
-    频率限制
-    :param phone: 手机号
-    :param limit: 限制次数
-    :param window: 时间窗口（秒）
-    :return: 是否允许
-    """
+    """频率限制"""
     now = datetime.now()
     key = f"rate_limit_{phone}"
     
     if key not in rate_limit_store:
         rate_limit_store[key] = []
     
-    # 清理过期记录
     rate_limit_store[key] = [t for t in rate_limit_store[key] if now - t < timedelta(seconds=window)]
     
     if len(rate_limit_store[key]) >= limit:
