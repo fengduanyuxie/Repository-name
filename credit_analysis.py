@@ -1,5 +1,5 @@
 # credit_analysis.py
-# 征信分析核心逻辑（精度优化版：先加后除，统一约分）
+# 征信分析核心逻辑（精度优化版：先加后除，美化排版）
 
 import re
 import base64
@@ -216,7 +216,7 @@ def extract_queries(text: str, report_date: datetime) -> Dict[str, int]:
     queries = {"30d": 0, "31_90d": 0, "91_180d": 0, "181_360d": 0, "micro_60d": 0, "self_60d": 0}
     valid_reasons = ["贷款审批", "信用卡审批", "资信审查", "担保资格审查", "保前审查", "法人代表"]
     
-    pattern_with_id = r'<td[^>]*>\d+<tr>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</tr>\s*<td[^>]*>([^<]+)<tr>\s*<td[^>]*>([^<]+)<tr>'
+    pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
     pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
     
     matches = re.findall(pattern_with_id, text)
@@ -245,7 +245,7 @@ def extract_queries(text: str, report_date: datetime) -> Dict[str, int]:
         except:
             pass
     
-    self_pattern_with_id = r'<td[^>]*>\d+</table>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
+    self_pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
     self_pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
     
     self_matches = re.findall(self_pattern_with_id, text)
@@ -319,13 +319,13 @@ def build_llm_prompt(stats: Dict) -> str:
 
 ### 查询记录
 - 30天内：{q['30d']}次，31-90天：{q['31_90d']}次，91-180天：{q['91_180d']}次，181-360天：{q['181_360d']}次
-- 60天内小网贷查询：{q['micro_60d']}次，60天内本人查询：{q['self_60d']}次
+- 60天内网贷查询：{q['micro_60d']}次，60天内本人查询：{q['self_60d']}次
 
 ### 贷款数据
 - 总机构数：{l['count']}家，总余额：{round(l['balance'], 2)}万元
 - 房贷：{l['housing_count']}笔，余额：{round(l['housing_balance'], 2)}万元
 - 车贷：{l['car_count']}笔，余额：{round(l['car_balance'], 2)}万元
-- 小网贷：{l['micro_count']}家，余额：{round(l['micro_balance'], 2)}万元
+- 网贷：{l['micro_count']}家，余额：{round(l['micro_balance'], 2)}万元
 - 当前逾期：{l['overdue_count']}个
 
 ### 信用卡数据
@@ -347,7 +347,7 @@ def call_deepseek(prompt: str) -> str:
     return resp.json()["choices"][0]["message"]["content"]
 
 def generate_report(markdown_text: str) -> Tuple[Dict, list]:
-    """生成完整报告，返回 (stats, report_lines)"""
+    """生成完整报告，返回 (stats, report_lines) - 美化版"""
     report_date = extract_report_date(markdown_text)
     gender, age, marriage = extract_basic_info(markdown_text, report_date)
     
@@ -380,42 +380,86 @@ def generate_report(markdown_text: str) -> Tuple[Dict, list]:
         "overdue": overdue
     }
     
-    # 构建报告第一部分（不使用 ### 前缀）
-    lines = [
-        "第一部分：简要汇总", "",
-        "基本信息", f"性别：{gender}", f"年龄：{age}", f"婚姻：{marriage}", f"风险预警：{risk_warn}", "",
-        "查询记录", "机构", f"30天内：{queries['30d']}", f"31-90天：{queries['31_90d']}", f"90-180天：{queries['91_180d']}", f"180-360天：{queries['181_360d']}", f"60天内小网贷：{queries['micro_60d']}", "本人", f"60天内本人：{queries['self_60d']}", "",
-        "5年内逾期", f"总月数：{overdue['total_months']}", f"90天以上的账户数：{overdue['90d_count']}", "",
-        "贷款"
-    ]
+    # 构建报告第一部分（美化排版）
+    lines = []
     
-    if loans['overdue_count']:
-        lines.append(f"当逾：{loans['overdue_count']}个")
-    if loans['count'] == 0 and balance_yuan == 0:
-        lines.append("无")
-    else:
-        lines.extend([f"机构数：{loans['count']}", f"总余额：{balance_yuan}万元"])
-        if loans['housing_count']:
-            lines.extend([f"房贷数：{loans['housing_count']}", f"房贷余额：{housing_balance_yuan}万元"])
-        if loans['car_count']:
-            lines.extend([f"车贷数：{loans['car_count']}", f"车贷余额：{car_balance_yuan}万元"])
-        lines.extend([f"小网贷的机构数：{loans['micro_count']}", f"小网贷的余额：{micro_balance_yuan}万元"])
+    # 1️⃣ 基础信息
+    lines.append("1️⃣ 基础信息")
+    lines.append(f"性别：{gender}")
+    lines.append(f"年龄：{age}岁")
+    lines.append(f"婚姻状况：{marriage}")
+    lines.append(f"风险预警：{risk_warn}")
     lines.append("")
     
-    lines.append("信用卡")
-    if credits['overdue']:
-        lines.append(f"当逾：{credits['overdue']}个")
-    if credits['abnormal_display']:
-        lines.append(f"非正常：{credits['abnormal_display']}")
-    if credits['count'] == 0 and credit_limit_yuan == 0 and credit_used_yuan == 0:
-        lines.append("无")
-    else:
-        lines.extend([f"机构数：{credits['count']}", f"授信额：{credit_limit_yuan}万元", f"已用额度：{credit_used_yuan}万元", f"使用率：{credits['usage_rate']}%"])
+    # 2️⃣ 查询记录（近360天）
+    lines.append("2️⃣ 查询记录（近360天）")
+    lines.append("时间范围      查询次数")
+    lines.append("────────────────────")
+    lines.append(f"30天内        {queries['30d']} 次")
+    lines.append(f"31–90天       {queries['31_90d']} 次")
+    lines.append(f"90–180天      {queries['91_180d']} 次")
+    lines.append(f"180–360天     {queries['181_360d']} 次")
+    lines.append("")
+    lines.append("🔍 特殊标记")
+    lines.append(f"60天内网贷查询：{queries['micro_60d']} 次")
+    lines.append(f"60天内本人查询（本人临柜/网查）：{queries['self_60d']} 次")
     lines.append("")
     
-    if g_cnt or guarantee_balance_yuan:
-        lines.extend(["担保信息", f"担保户数：{g_cnt}", f"担保余额：{guarantee_balance_yuan}万元", ""])
+    # 3️⃣ 逾期记录（5年内）
+    lines.append("3️⃣ 逾期记录（5年内）")
+    lines.append(f"逾期总月数：{overdue['total_months']} 个月")
+    lines.append(f"90天以上账户：{overdue['90d_count']} 个")
+    if overdue['total_months'] == 0 and overdue['90d_count'] == 0:
+        lines.append("✓ 无逾期记录，信用履约良好")
+    lines.append("")
+    
+    # 4️⃣ 贷款总览
+    lines.append("4️⃣ 贷款总览")
+    lines.append("项目          数值")
+    lines.append("────────────────────")
+    lines.append(f"总贷款机构数   {loans['count']} 家")
+    lines.append(f"总贷款余额     {balance_yuan} 万元")
+    lines.append("")
+    lines.append("细分如下：")
+    if loans['car_count'] > 0:
+        lines.append("🚗 车贷")
+        lines.append(f"   机构数：{loans['car_count']} 家")
+        lines.append(f"   余额：{car_balance_yuan} 万元")
+    if loans['micro_count'] > 0:
+        lines.append("📱 网贷（非银行小额贷款）")
+        lines.append(f"   机构数：{loans['micro_count']} 家")
+        lines.append(f"   余额：{micro_balance_yuan} 万元")
+    if loans['micro_count'] >= 5:
+        lines.append("⚠️ 网贷机构数较多（{}家），可能影响银行综合评分".format(loans['micro_count']))
+    if loans['housing_count'] > 0:
+        lines.append("🏠 房贷")
+        lines.append(f"   机构数：{loans['housing_count']} 家")
+        lines.append(f"   余额：{housing_balance_yuan} 万元")
+    lines.append("")
+    
+    # 5️⃣ 信用卡使用情况
+    lines.append("5️⃣ 信用卡使用情况")
+    lines.append(f"发卡机构数：{credits['count']} 家")
+    lines.append(f"总授信额度：{credit_limit_yuan} 万元")
+    lines.append(f"已用额度：{credit_used_yuan} 万元")
+    lines.append(f"使用率：{credits['usage_rate']}%")
+    if credits['usage_rate'] > 100:
+        lines.append("⚠️ 使用率超过100%，存在超限情况")
+    elif credits['usage_rate'] > 80:
+        lines.append("⚠️ 使用率较高，建议适当降低")
+    lines.append("")
+    
+    # 6️⃣ 担保信息
+    if g_cnt > 0:
+        lines.append("6️⃣ 担保信息")
+        lines.append(f"担保户数：{g_cnt} 户")
+        lines.append(f"担保余额：{guarantee_balance_yuan} 万元")
+        lines.append("")
+    
+    # 7️⃣ 公共记录
     if pub_rec:
-        lines.extend(["公共记录", pub_rec])
+        lines.append("7️⃣ 公共记录")
+        lines.append(pub_rec)
+        lines.append("")
     
     return stats, lines

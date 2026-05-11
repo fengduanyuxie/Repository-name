@@ -178,12 +178,12 @@ function renderUserList(users) {
             '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">创建时间</th>' +
             '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">最后使用</th>' +
             '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">操作</th>' +
-            '</tr></thead><tbody>';
+            '</td></thead><tbody>';
     for (const u of users) {
         const created = u.created_at ? new Date(u.created_at).toLocaleString('zh-CN') : '-';
         const lastUsed = u.last_used_at ? new Date(u.last_used_at).toLocaleString('zh-CN') : '未使用';
         const expireAt = u.expire_at ? new Date(u.expire_at).toLocaleString('zh-CN') : '永久';
-        const escapedPhone = u.phone.replace(/[&<>]/g, function(m) {
+        const escapedPhone = (u.phone || '').replace(/[&<>]/g, function(m) {
             if (m === '&') return '&amp;';
             if (m === '<') return '&lt;';
             if (m === '>') return '&gt;';
@@ -191,8 +191,8 @@ function renderUserList(users) {
         });
         html += `<tr>
             <td style="padding:12px;border-bottom:1px solid #eee;">${escapedPhone}</td>
-            <td style="padding:12px;border-bottom:1px solid #eee;font-family:monospace;font-size:12px;word-break:break-all;max-width:300px;">${escapedPhone}</td>
-            <td style="padding:12px;border-bottom:1px solid #eee;text-align:center;font-weight:bold;">${u.balance}</td>
+            <td style="padding:12px;border-bottom:1px solid #eee;font-family:monospace;font-size:12px;word-break:break-all;max-width:300px;">${(u.api_key || '').substring(0, 30)}...</td>
+            <td style="padding:12px;border-bottom:1px solid #eee;text-align:center;font-weight:bold;">${u.balance || 0}</td>
             <td style="padding:12px;border-bottom:1px solid #eee;">${expireAt}</td>
             <td style="padding:12px;border-bottom:1px solid #eee;">${created}</td>
             <td style="padding:12px;border-bottom:1px solid #eee;">${lastUsed}</td>

@@ -1,5 +1,5 @@
 # main.py
-# 征信报告分析系统 - 主入口（模块化版本）
+# 征信报告分析系统 - 主入口（模块化版本 v051114）
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -50,8 +50,8 @@ async def frontend():
         .loading{display:none;text-align:center;margin:24px 0;color:#4a90e2}
         .result-container{display:none;margin-top:24px}
         .result-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
-        .result-header button{padding:8px 16px;width:auto;margin:0;background:#28a745}
-        .result-header button:hover{background:#218838}
+        .result-header button{padding:8px 16px;width:auto;margin:0;background:#17a2b8}
+        .result-header button:hover{background:#138496}
         .result{background:#f9f9f9;border-radius:16px;padding:16px;font-family:monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;max-height:500px;overflow:auto;border:1px solid #e0e0e0}
         .info-note{background:#e8f4fd;padding:12px;border-radius:12px;margin-top:20px;font-size:12px;color:#4a90e2;text-align:center}
         .copy-success{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#28a745;color:#fff;padding:10px 20px;border-radius:40px;font-size:14px;z-index:1000;display:none}
@@ -79,14 +79,14 @@ async def frontend():
     <div class="result-container" id="resultContainer">
         <div class="result-header">
             <span style="font-size:14px;font-weight:500;">📋 分析结果</span>
-            <div>
-                <button id="copyBtn" style="display:none;background:#17a2b8;width:auto;padding:8px 16px;">📋 复制报告</button>
-                <button id="exportBtn" style="display:none;background:#28a745;width:auto;padding:8px 16px;">📁 导出TXT</button>
-            </div>
+            <button id="copyBtn" style="display:none;background:#17a2b8;width:auto;padding:8px 16px;">📋 复制报告</button>
         </div>
         <div class="result" id="result"></div>
     </div>
-    <div class="info-note">💡 提示：API Key获取请联系管理员（微信:DXNBZ579）</div>
+    <div class="info-note">
+        💡 提示：<br>
+        API Key获取请联系管理员（微信:DXNBZ579）
+    </div>
 </div>
 <div id="copySuccess" class="copy-success">✅ 已复制到剪贴板</div>
 
@@ -101,7 +101,6 @@ async def frontend():
     const phoneInput = document.getElementById('phone');
     const apiKeyInput = document.getElementById('apiKey');
     const copyBtn = document.getElementById('copyBtn');
-    const exportBtn = document.getElementById('exportBtn');
     const copySuccess = document.getElementById('copySuccess');
     
     let selectedFile = null;
@@ -135,7 +134,6 @@ async def frontend():
         analyzeBtn.disabled = true;
         currentReport = '';
         copyBtn.style.display = 'none';
-        exportBtn.style.display = 'none';
     }
     
     function copyReport() {
@@ -148,21 +146,7 @@ async def frontend():
         });
     }
     
-    function exportReport() {
-        if (!currentReport) return;
-        const blob = new Blob([currentReport], {type: 'text/plain;charset=utf-8'});
-        const link = document.createElement('a');
-        const url = URL.createObjectURL(blob);
-        link.href = url;
-        link.download = `征信报告_${new Date().toISOString().slice(0,19).replace(/:/g, '-')}.txt`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-    }
-    
     copyBtn.addEventListener('click', copyReport);
-    exportBtn.addEventListener('click', exportReport);
     
     uploadArea.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', e => e.target.files.length > 0 && handleFile(e.target.files[0]));
@@ -199,7 +183,6 @@ async def frontend():
         loadingDiv.style.display = 'block';
         resultContainer.style.display = 'none';
         copyBtn.style.display = 'none';
-        exportBtn.style.display = 'none';
         
         const formData = new FormData();
         formData.append('file', selectedFile);
@@ -219,7 +202,6 @@ async def frontend():
             resultDiv.innerText = currentReport;
             resultContainer.style.display = 'block';
             copyBtn.style.display = 'inline-block';
-            exportBtn.style.display = 'inline-block';
             resultContainer.scrollIntoView({ behavior: 'smooth' });
         } catch (err) {
             alert('错误：' + err.message);
