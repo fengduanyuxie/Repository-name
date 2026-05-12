@@ -1,5 +1,5 @@
 # main.py
-# 征信报告分析系统 - 主入口（模块化版本 v051114）
+# 征信报告分析系统 - 主入口（模块化版本 v051212）
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,6 +47,10 @@ async def frontend():
         button{background:#4a90e2;color:#fff;border:none;padding:14px 28px;border-radius:40px;font-size:16px;font-weight:500;cursor:pointer;width:100%;margin-top:8px}
         button:hover{background:#357abd}
         button:disabled{background:#ccc;cursor:not-allowed}
+        .button-group{display:flex;gap:12px;margin-top:8px}
+        .button-group button{flex:1;margin-top:0}
+        .btn-recharge{background:#28a745}
+        .btn-recharge:hover{background:#218838}
         .loading{display:none;text-align:center;margin:24px 0;color:#4a90e2}
         .result-container{display:none;margin-top:24px}
         .result-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
@@ -74,8 +78,12 @@ async def frontend():
         <input type="file" id="fileInput" accept=".pdf" style="display:none">
     </div>
     
-    <button id="analyzeBtn" disabled>开始分析</button>
-    <div class="loading" id="loading">正在分析，请稍候...</div>
+    <div class="button-group">
+        <button id="analyzeBtn" disabled>开始分析</button>
+        <button id="rechargeBtn" class="btn-recharge">💰 充值</button>
+    </div>
+    
+    <div class="loading" id="loading">正在为您分析，请稍候...</div>
     <div class="result-container" id="resultContainer">
         <div class="result-header">
             <span style="font-size:14px;font-weight:500;">📋 分析结果</span>
@@ -94,6 +102,7 @@ async def frontend():
     const uploadArea = document.getElementById('uploadArea');
     const fileInput = document.getElementById('fileInput');
     const analyzeBtn = document.getElementById('analyzeBtn');
+    const rechargeBtn = document.getElementById('rechargeBtn');
     const loadingDiv = document.getElementById('loading');
     const resultDiv = document.getElementById('result');
     const resultContainer = document.getElementById('resultContainer');
@@ -105,6 +114,11 @@ async def frontend():
     
     let selectedFile = null;
     let currentReport = '';
+    
+    // 充值按钮跳转
+    rechargeBtn.addEventListener('click', () => {
+        window.location.href = '/recharge';
+    });
     
     function checkAuth() {
         analyzeBtn.disabled = !(selectedFile && phoneInput.value.trim() && apiKeyInput.value.trim());
@@ -204,7 +218,7 @@ async def frontend():
             copyBtn.style.display = 'inline-block';
             resultContainer.scrollIntoView({ behavior: 'smooth' });
         } catch (err) {
-            alert('错误：' + err.message);
+            alert('抱歉，出错了：' + err.message);
         } finally {
             loadingDiv.style.display = 'none';
             analyzeBtn.disabled = false;
