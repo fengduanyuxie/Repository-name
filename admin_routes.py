@@ -1,10 +1,14 @@
 # admin_routes.py
-# 管理后台路由（含日志、统计图表）
+# 管理后台路由（含日志、统计图表、原始数据导出）
 
-from fastapi import APIRouter, HTTPException, Depends, Form
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, HTTPException, Depends, Form, Query
+from fastapi.responses import HTMLResponse, StreamingResponse
 import database
 import auth
+import json
+import csv
+from io import StringIO
+from datetime import datetime
 
 router = APIRouter(tags=["admin"])
 
@@ -60,6 +64,10 @@ async def admin_page():
         .tab-content.active{display:block}
         .log-table{font-size:12px}
         .log-table td{word-break:break-all}
+        .export-box{display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap}
+        .export-box .form-group{flex:1;min-width:180px}
+        .export-box button{margin:0}
+        .date-input{width:100%}
     </style>
 </head>
 <body>
@@ -106,6 +114,7 @@ async function showAdminPanel() {
                     <button class="tab active" onclick="showTab('users')">👥 用户管理</button>
                     <button class="tab" onclick="showTab('stats')">📊 使用统计</button>
                     <button class="tab" onclick="showTab('logs')">📝 操作日志</button>
+                    <button class="tab" onclick="showTab('export')">📥 原始数据导出</button>
                 </div>
                 <div id="tab-users" class="tab-content active">
                     <h2>➕ 添加/充值用户</h2>
@@ -130,6 +139,38 @@ async function showAdminPanel() {
                 </div>
                 <div id="tab-logs" class="tab-content">
                     <div id="logTable">加载中...</div>
+                </div>
+                <div id="tab-export" class="tab-content">
+                    <h2>📥 导出原始分析数据</h2>
+                    <div class="export-box">
+                        <div class="form-group">
+                            <label>起始日期</label>
+                            <input type="date" id="startDate" class="date-input">
+                        </div>
+                        <div class="form-group">
+                            <label>结束日期</label>
+                            <input type="date" id="endDate" class="date-input">
+                        </div>
+                        <div class="form-group">
+                            <label>导出格式</label>
+                            <select id="exportFormat">
+                                <option value="json">JSON</option>
+                                <option value="csv">CSV</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <button onclick="exportData()" style="background:#28a745">📥 导出数据</button>
+                        </div>
+                    </div>
+                    <div id="exportResult" class="result"></div>
+                    <hr style="margin:20px 0">
+                    <h3>📊 导出说明</h3>
+                    <ul style="color:#666;font-size:13px;line-height:1.8">
+                        <li>• 不选择日期则导出全部数据</li>
+                        <li>• 导出内容包含：手机号、报告原始文本、解析时间</li>
+                        <li>• JSON格式适合程序处理，CSV格式适合Excel打开</li>
+                        <li>• 导出文件大小可能较大，请耐心等待</li>
+                    </ul>
                 </div>
             </div>
         </div>`;
@@ -339,9 +380,54 @@ async function loadLogs() {
                 <td style="padding:8px;">${log.details || '-'}</td>
             </tr>`;
         }
-        html += '</tbody><table>';
+        html += '</tbody></table>';
         logDiv.innerHTML = html;
     } catch(e) { logDiv.innerHTML = `<div class="result error">加载失败: ${e.message}</div>`; }
+}
+
+async function exportData() {
+    const token = localStorage.getItem(tokenKey);
+    const startDate = document.getElementById('startDate').value;
+    const endDate = document.getElementById('endDate').value;
+    const format = document.getElementById('exportFormat').value;
+    const resultDiv = document.getElementById('exportResult');
+    
+    let url = `/admin/export_raw_reports?format=${format}`;
+    if (startDate) url += `&start_date=${startDate}`;
+    if (endDate) url += `&end_date=${endDate}`;
+    
+    resultDiv.className = 'result';
+    resultDiv.innerHTML = '⏳ 正在导出数据，请稍候...';
+    resultDiv.style.display = 'block';
+    
+    try {
+        const resp = await fetch(url, { headers: {'Authorization': `Bearer ${token}`} });
+        if (resp.status === 401) { logout(); return; }
+        if (!resp.ok) {
+            const error = await resp.json();
+            resultDiv.className = 'result error';
+            resultDiv.innerHTML = `❌ 导出失败: ${error.detail || '未知错误'}`;
+            return;
+        }
+        
+        const blob = await resp.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        const filename = `raw_reports_${new Date().toISOString().slice(0,19).replace(/:/g, '-')}.${format === 'csv' ? 'csv' : 'json'}`;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(downloadUrl);
+        
+        resultDiv.className = 'result success';
+        resultDiv.innerHTML = `✅ 导出成功！文件已下载: ${filename}`;
+        setTimeout(() => { resultDiv.style.display = 'none'; }, 3000);
+    } catch(e) {
+        resultDiv.className = 'result error';
+        resultDiv.innerHTML = `❌ 网络错误: ${e.message}`;
+    }
 }
 </script>
 </body>
@@ -404,3 +490,81 @@ async def get_stats(_=Depends(auth.verify_admin_request)):
 @router.get("/admin/logs")
 async def get_logs(_=Depends(auth.verify_admin_request)):
     return {"logs": database.get_admin_logs(100)}
+
+# ========== 原始数据导出接口 ==========
+@router.get("/admin/export_raw_reports")
+async def export_raw_reports(
+    start_date: str = Query(None, description="起始日期 YYYY-MM-DD"),
+    end_date: str = Query(None, description="结束日期 YYYY-MM-DD"),
+    format: str = Query("json", description="导出格式 json/csv"),
+    _=Depends(auth.verify_admin_request)
+):
+    """导出原始分析数据（仅管理员）- 支持按起止日期筛选"""
+    
+    if database.db is None:
+        raise HTTPException(500, "数据库未连接")
+    
+    raw_collection = database.db["raw_reports"]
+    
+    # 构建查询条件
+    query = {}
+    if start_date or end_date:
+        date_filter = {}
+        if start_date:
+            try:
+                start = datetime.strptime(start_date, "%Y-%m-%d")
+                date_filter["$gte"] = start
+            except:
+                pass
+        if end_date:
+            try:
+                end = datetime.strptime(end_date, "%Y-%m-%d")
+                # 包含结束日期当天
+                end = end.replace(hour=23, minute=59, second=59)
+                date_filter["$lte"] = end
+            except:
+                pass
+        if date_filter:
+            query["created_at"] = date_filter
+    
+    # 查询数据
+    cursor = raw_collection.find(query, {"_id": 0}).sort("created_at", -1)
+    reports = list(cursor)
+    
+    if not reports:
+        raise HTTPException(404, detail="未找到符合条件的数据")
+    
+    # 处理日期字段为字符串（JSON序列化需要）
+    for r in reports:
+        if "created_at" in r and isinstance(r["created_at"], datetime):
+            r["created_at"] = r["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+    
+    # 根据格式导出
+    if format.lower() == "csv":
+        # 导出为 CSV
+        output = StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["手机号", "解析时间", "报告文本长度", "报告文本摘要"])
+        for r in reports:
+            raw_text = r.get("raw_text", "")
+            writer.writerow([
+                r.get("phone", ""),
+                r.get("created_at", ""),
+                len(raw_text),
+                raw_text[:200] + "..." if len(raw_text) > 200 else raw_text
+            ])
+        
+        return StreamingResponse(
+            iter([output.getvalue().encode('utf-8-sig')]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=raw_reports_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"}
+        )
+    else:
+        # 导出为 JSON（完整数据）
+        json_str = json.dumps(reports, ensure_ascii=False, indent=2)
+        
+        return StreamingResponse(
+            iter([json_str.encode('utf-8')]),
+            media_type="application/json",
+            headers={"Content-Disposition": f"attachment; filename=raw_reports_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"}
+        )
