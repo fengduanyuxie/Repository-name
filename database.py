@@ -1,5 +1,5 @@
 # database.py
-# MongoDB 数据库操作（含日志、统计、有效期、充值订单）
+# MongoDB 数据库操作（含日志、统计、有效期、充值订单、临时存储）
 
 from datetime import datetime, timedelta
 from typing import Dict, Any, Tuple, List, Optional
@@ -12,10 +12,11 @@ users_collection = None
 logs_collection = None
 stats_collection = None
 recharge_orders_collection = None
+temp_reports_collection = None
 
 def init_db():
     """初始化数据库连接"""
-    global mongo_client, db, users_collection, logs_collection, stats_collection, recharge_orders_collection
+    global mongo_client, db, users_collection, logs_collection, stats_collection, recharge_orders_collection, temp_reports_collection
     if not config.MONGO_URI:
         print("警告: MONGO_URI 未设置")
         return False
@@ -27,6 +28,7 @@ def init_db():
         logs_collection = db["admin_logs"]
         stats_collection = db["usage_stats"]
         recharge_orders_collection = db["recharge_orders"]
+        temp_reports_collection = db["temp_reports"]
         
         users_collection.create_index("phone", unique=True)
         users_collection.create_index("api_key", unique=True)
@@ -34,6 +36,8 @@ def init_db():
         logs_collection.create_index("created_at")
         stats_collection.create_index("date", unique=True)
         recharge_orders_collection.create_index("order_id", unique=True)
+        # TTL 索引：24小时后自动删除临时报告
+        temp_reports_collection.create_index("expires_at", expireAfterSeconds=0)
         
         print("MongoDB 连接成功")
         return True
@@ -59,6 +63,21 @@ def verify_user(phone: str, api_key: str) -> tuple:
         return True, user.get("balance", 0)
     return False, 0
 
+def verify_user_exists(phone: str, api_key: str) -> tuple:
+    """验证用户是否存在（不计次数），返回 (是否存在, 用户信息, 剩余次数)"""
+    if users_collection is None:
+        return False, None, 0
+    user = users_collection.find_one({
+        "phone": phone, 
+        "api_key": api_key
+    })
+    if user:
+        balance = user.get("balance", 0)
+        expire_at = user.get("expire_at")
+        is_valid = balance > 0 and (expire_at is None or expire_at > datetime.now())
+        return True, user, balance if is_valid else 0
+    return False, None, 0
+
 def consume_balance(phone: str, api_key: str) -> bool:
     """扣减一次使用次数"""
     if users_collection is None:
@@ -82,7 +101,7 @@ def generate_api_key(phone: str) -> str:
     import secrets
     return f"ak_{phone[-6:]}_{secrets.token_hex(8)}"
 
-def add_or_recharge_user(phone: str, balance: int, days_valid: int = 30) -> Tuple[str, int]:
+def add_or_recharge_user(phone: str, balance: int, days_valid: int = 62) -> Tuple[str, int]:
     """添加或充值用户，返回 (api_key, 新余额)"""
     api_key = generate_api_key(phone)
     expire_at = datetime.now() + timedelta(days=days_valid) if days_valid > 0 else None
@@ -198,3 +217,48 @@ def get_order_by_id(order_id: str):
     if recharge_orders_collection is None:
         return None
     return recharge_orders_collection.find_one({"order_id": order_id}, {"_id": 0})
+
+def get_orders_by_phone(phone: str, limit: int = 50):
+    """获取用户的所有订单"""
+    if recharge_orders_collection is None:
+        return []
+    return list(recharge_orders_collection.find(
+        {"phone": phone},
+        {"_id": 0}
+    ).sort("created_at", -1).limit(limit))
+
+# ========== 临时存储（MongoDB TTL）==========
+def save_temp_report(temp_id: str, report_content: str, phone: str = None, api_key: str = None):
+    """保存临时报告，24小时后自动过期"""
+    if temp_reports_collection is None:
+        return False
+    temp_reports_collection.insert_one({
+        "temp_id": temp_id,
+        "report": report_content,
+        "phone": phone,
+        "api_key": api_key,
+        "created_at": datetime.now(),
+        "expires_at": datetime.now() + timedelta(hours=24)
+    })
+    return True
+
+def get_temp_report(temp_id: str):
+    """获取临时报告"""
+    if temp_reports_collection is None:
+        return None
+    return temp_reports_collection.find_one({"temp_id": temp_id}, {"_id": 0})
+
+def delete_temp_report(temp_id: str):
+    """删除临时报告"""
+    if temp_reports_collection is None:
+        return
+    temp_reports_collection.delete_one({"temp_id": temp_id})
+
+def update_temp_report_phone(temp_id: str, phone: str, api_key: str):
+    """更新临时报告关联的用户信息"""
+    if temp_reports_collection is None:
+        return
+    temp_reports_collection.update_one(
+        {"temp_id": temp_id},
+        {"$set": {"phone": phone, "api_key": api_key}}
+    )

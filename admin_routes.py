@@ -1,5 +1,5 @@
 # admin_routes.py
-# 管理后台路由（含日志、统计图表、原始数据导出）
+# 管理后台路由（含日志、统计图表、数据导出、补单管理）
 
 from fastapi import APIRouter, HTTPException, Depends, Form, Query
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -11,6 +11,7 @@ from io import StringIO
 from datetime import datetime
 
 router = APIRouter(tags=["admin"])
+
 
 @router.get("/admin")
 async def admin_page():
@@ -57,7 +58,7 @@ async def admin_page():
         .stat-card{background:#f8f9fa;border-radius:12px;padding:16px;text-align:center}
         .stat-number{font-size:28px;font-weight:bold;color:#1e3c72}
         .stat-label{color:#666;margin-top:8px}
-        .tabs{display:flex;gap:10px;margin-bottom:20px;border-bottom:1px solid #ddd}
+        .tabs{display:flex;gap:10px;margin-bottom:20px;border-bottom:1px solid #ddd;flex-wrap:wrap}
         .tab{padding:10px 20px;cursor:pointer;background:none;border:none;font-size:14px}
         .tab.active{color:#4a90e2;border-bottom:2px solid #4a90e2}
         .tab-content{display:none}
@@ -68,6 +69,8 @@ async def admin_page():
         .export-box .form-group{flex:1;min-width:180px}
         .export-box button{margin:0}
         .date-input{width:100%}
+        .order-info{background:#f8f9fa;padding:16px;border-radius:12px;margin-top:16px}
+        .order-info p{margin:8px 0}
     </style>
 </head>
 <body>
@@ -114,13 +117,14 @@ async function showAdminPanel() {
                     <button class="tab active" onclick="showTab('users')">👥 用户管理</button>
                     <button class="tab" onclick="showTab('stats')">📊 使用统计</button>
                     <button class="tab" onclick="showTab('logs')">📝 操作日志</button>
-                    <button class="tab" onclick="showTab('export')">📥 原始数据导出</button>
+                    <button class="tab" onclick="showTab('export')">📥 数据导出</button>
+                    <button class="tab" onclick="showTab('recharge')">🔧 补单管理</button>
                 </div>
                 <div id="tab-users" class="tab-content active">
                     <h2>➕ 添加/充值用户</h2>
                     <div class="form-group"><label>手机号</label><input type="tel" id="phone" placeholder="13812345678"></div>
                     <div class="form-group"><label>充值次数</label><input type="number" id="balance" value="10"></div>
-                    <div class="form-group"><label>有效期（天）</label><input type="number" id="days" value="30"><small style="color:#999">0表示永久有效</small></div>
+                    <div class="form-group"><label>有效期（天）</label><input type="number" id="days" value="62"><small style="color:#999">0表示永久有效</small></div>
                     <button onclick="addUser()">生成/充值</button>
                     <div id="addResult" class="result"></div>
                     
@@ -141,7 +145,7 @@ async function showAdminPanel() {
                     <div id="logTable">加载中...</div>
                 </div>
                 <div id="tab-export" class="tab-content">
-                    <h2>📥 导出原始分析数据</h2>
+                    <h2>📥 导出分析数据</h2>
                     <div class="export-box">
                         <div class="form-group">
                             <label>起始日期</label>
@@ -169,8 +173,17 @@ async function showAdminPanel() {
                         <li>• 不选择日期则导出全部数据</li>
                         <li>• 导出内容包含：手机号、报告原始文本、解析时间</li>
                         <li>• JSON格式适合程序处理，CSV格式适合Excel打开</li>
-                        <li>• 导出文件大小可能较大，请耐心等待</li>
                     </ul>
+                </div>
+                <div id="tab-recharge" class="tab-content">
+                    <h2>🔧 补单管理</h2>
+                    <div class="form-group">
+                        <label>订单号</label>
+                        <input type="text" id="orderId" placeholder="请输入订单号" style="width:300px">
+                    </div>
+                    <button onclick="queryOrder()">查询订单</button>
+                    <button onclick="manualRecharge()" id="manualBtn" style="background:#28a745; display:none">手动补单</button>
+                    <div id="orderInfo" class="order-info"></div>
                 </div>
             </div>
         </div>`;
@@ -212,13 +225,7 @@ function renderUserList(users) {
     }
     let html = '<table style="width:100%;border-collapse:collapse;">';
     html += '<thead><tr>' +
-            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">手机号</th>' +
-            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">API Key</th>' +
-            '<th style="padding:12px;text-align:center;border-bottom:1px solid #eee;background:#f5f5f5;">剩余次数</th>' +
-            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">有效期</th>' +
-            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">创建时间</th>' +
-            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">最后使用</th>' +
-            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">操作</th>' +
+            '<th>手机号</th><th>API Key</th><th>剩余次数</th><th>有效期</th><th>创建时间</th><th>最后使用</th><th>操作</th>' +
             '</tr></thead><tbody>';
     for (const u of users) {
         const created = u.created_at ? new Date(u.created_at).toLocaleString('zh-CN') : '-';
@@ -231,15 +238,15 @@ function renderUserList(users) {
             return m;
         });
         html += `<tr>
-            <td style="padding:12px;border-bottom:1px solid #eee;">${escapedPhone}</td>
-            <td style="padding:12px;border-bottom:1px solid #eee;font-family:monospace;font-size:12px;word-break:break-all;max-width:300px;">${u.api_key || ''}</td>
-            <td style="padding:12px;border-bottom:1px solid #eee;text-align:center;font-weight:bold;">${u.balance || 0}</td>
-            <td style="padding:12px;border-bottom:1px solid #eee;">${expireAt}</td>
-            <td style="padding:12px;border-bottom:1px solid #eee;">${created}</td>
-            <td style="padding:12px;border-bottom:1px solid #eee;">${lastUsed}</td>
-            <td style="padding:12px;border-bottom:1px solid #eee;">
-                <button onclick="recharge('${escapedPhone}')" style="padding:4px 12px;margin:0 4px;background:#4a90e2;color:#fff;border:none;border-radius:6px;cursor:pointer;">充值</button>
-                <button onclick="del('${escapedPhone}')" style="padding:4px 12px;margin:0 4px;background:#dc3545;color:#fff;border:none;border-radius:6px;cursor:pointer;">删除</button>
+            <td style="padding:12px;">${escapedPhone}</td>
+            <td style="padding:12px;font-family:monospace;font-size:12px;word-break:break-all;">${u.api_key || ''}</td>
+            <td style="padding:12px;text-align:center;font-weight:bold;">${u.balance || 0}</td>
+            <td style="padding:12px;">${expireAt}</td>
+            <td style="padding:12px;">${created}</td>
+            <td style="padding:12px;">${lastUsed}</td>
+            <td style="padding:12px;">
+                <button onclick="recharge('${escapedPhone}')">充值</button>
+                <button onclick="del('${escapedPhone}')" style="background:#dc3545">删除</button>
             </td>
         </tr>`;
     }
@@ -429,10 +436,85 @@ async function exportData() {
         resultDiv.innerHTML = `❌ 网络错误: ${e.message}`;
     }
 }
+
+// 补单管理功能
+async function queryOrder() {
+    const token = localStorage.getItem(tokenKey);
+    const orderId = document.getElementById('orderId').value.trim();
+    const orderInfoDiv = document.getElementById('orderInfo');
+    const manualBtn = document.getElementById('manualBtn');
+    
+    if (!orderId) {
+        orderInfoDiv.innerHTML = '<p style="color:#dc3545">请输入订单号</p>';
+        return;
+    }
+    
+    orderInfoDiv.innerHTML = '查询中...';
+    manualBtn.style.display = 'none';
+    
+    try {
+        const resp = await fetch(`/admin/order_detail/${orderId}`, { headers: {'Authorization': `Bearer ${token}`} });
+        const data = await resp.json();
+        
+        if (!resp.ok) {
+            orderInfoDiv.innerHTML = `<p style="color:#dc3545">❌ ${data.detail || '订单不存在'}</p>`;
+            return;
+        }
+        
+        const statusText = data.status === 'paid' ? '✅ 已支付' : '⏳ 待支付';
+        const statusColor = data.status === 'paid' ? '#2e7d32' : '#ed6c02';
+        
+        orderInfoDiv.innerHTML = `
+            <p><strong>订单号：</strong>${data.order_id}</p>
+            <p><strong>手机号：</strong>${data.phone || '-'}</p>
+            <p><strong>套餐：</strong>${data.package_type === 'trial' ? '次卡' : '月卡'}</p>
+            <p><strong>金额：</strong>¥${data.price}</p>
+            <p><strong>次数：</strong>${data.times}次</p>
+            <p><strong>状态：</strong><span style="color:${statusColor}">${statusText}</span></p>
+            <p><strong>创建时间：</strong>${data.created_at || '-'}</p>
+        `;
+        
+        if (data.status !== 'paid') {
+            manualBtn.style.display = 'inline-block';
+            manualBtn.onclick = () => manualRecharge(orderId);
+        } else {
+            manualBtn.style.display = 'none';
+        }
+    } catch(e) {
+        orderInfoDiv.innerHTML = `<p style="color:#dc3545">网络错误: ${e.message}</p>`;
+    }
+}
+
+async function manualRecharge(orderId) {
+    const token = localStorage.getItem(tokenKey);
+    if (!confirm(`确认手动补单 ${orderId} 吗？`)) return;
+    
+    try {
+        const resp = await fetch('/admin/manual_recharge', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded', 'Authorization': `Bearer ${token}`},
+            body: new URLSearchParams({order_id: orderId})
+        });
+        const data = await resp.json();
+        
+        if (resp.ok) {
+            alert(`✅ 补单成功！已为用户添加 ${data.times} 次`);
+            queryOrder();
+            loadUsers();
+            loadStats();
+            loadLogs();
+        } else {
+            alert(`❌ ${data.detail || '补单失败'}`);
+        }
+    } catch(e) {
+        alert(`网络错误: ${e.message}`);
+    }
+}
 </script>
 </body>
 </html>
     ''')
+
 
 @router.post("/admin/login")
 async def admin_login(password: str = Form(...)):
@@ -442,13 +524,15 @@ async def admin_login(password: str = Form(...)):
     token = auth.create_access_token(data={"sub": "admin", "role": "admin"})
     return {"success": True, "token": token}
 
+
 @router.post("/admin/add_user")
-async def add_user(phone: str = Form(...), balance: int = Form(10), days: int = Form(30), _=Depends(auth.verify_admin_request)):
+async def add_user(phone: str = Form(...), balance: int = Form(10), days: int = Form(62), _=Depends(auth.verify_admin_request)):
     if not phone or balance <= 0:
         raise HTTPException(400, detail="参数错误")
     api_key, new_balance = database.add_or_recharge_user(phone, balance, days)
     database.add_admin_log("admin", "add_user", phone, f"充值{balance}次，有效期{days}天")
     return {"success": True, "phone": phone, "api_key": api_key, "balance": new_balance}
+
 
 @router.post("/admin/recharge")
 async def recharge_user(phone: str = Form(...), amount: int = Form(...), _=Depends(auth.verify_admin_request)):
@@ -462,6 +546,7 @@ async def recharge_user(phone: str = Form(...), amount: int = Form(...), _=Depen
     database.add_admin_log("admin", "recharge", phone, f"充值{amount}次")
     return {"success": True, "phone": phone, "added": amount, "new_balance": new_user["balance"]}
 
+
 @router.post("/admin/delete_user")
 async def admin_delete_user(phone: str = Form(...), _=Depends(auth.verify_admin_request)):
     if database.delete_user(phone):
@@ -469,9 +554,11 @@ async def admin_delete_user(phone: str = Form(...), _=Depends(auth.verify_admin_
         return {"success": True, "phone": phone}
     raise HTTPException(404, detail="用户不存在")
 
+
 @router.get("/admin/users")
 async def list_users(_=Depends(auth.verify_admin_request)):
     return {"users": database.get_all_users()}
+
 
 @router.get("/admin/stats")
 async def get_stats(_=Depends(auth.verify_admin_request)):
@@ -487,11 +574,13 @@ async def get_stats(_=Depends(auth.verify_admin_request)):
         "chartData": chart_data
     }
 
+
 @router.get("/admin/logs")
 async def get_logs(_=Depends(auth.verify_admin_request)):
     return {"logs": database.get_admin_logs(100)}
 
-# ========== 原始数据导出接口 ==========
+
+# ========== 数据导出接口 ==========
 @router.get("/admin/export_raw_reports")
 async def export_raw_reports(
     start_date: str = Query(None, description="起始日期 YYYY-MM-DD"),
@@ -499,14 +588,11 @@ async def export_raw_reports(
     format: str = Query("json", description="导出格式 json/csv"),
     _=Depends(auth.verify_admin_request)
 ):
-    """导出原始分析数据（仅管理员）- 支持按起止日期筛选"""
-    
     if database.db is None:
-        raise HTTPException(500, "数据库未连接")
+        raise HTTPException(500, detail="数据库未连接")
     
     raw_collection = database.db["raw_reports"]
     
-    # 构建查询条件
     query = {}
     if start_date or end_date:
         date_filter = {}
@@ -519,7 +605,6 @@ async def export_raw_reports(
         if end_date:
             try:
                 end = datetime.strptime(end_date, "%Y-%m-%d")
-                # 包含结束日期当天
                 end = end.replace(hour=23, minute=59, second=59)
                 date_filter["$lte"] = end
             except:
@@ -527,21 +612,17 @@ async def export_raw_reports(
         if date_filter:
             query["created_at"] = date_filter
     
-    # 查询数据
     cursor = raw_collection.find(query, {"_id": 0}).sort("created_at", -1)
     reports = list(cursor)
     
     if not reports:
         raise HTTPException(404, detail="未找到符合条件的数据")
     
-    # 处理日期字段为字符串（JSON序列化需要）
     for r in reports:
         if "created_at" in r and isinstance(r["created_at"], datetime):
             r["created_at"] = r["created_at"].strftime("%Y-%m-%d %H:%M:%S")
     
-    # 根据格式导出
     if format.lower() == "csv":
-        # 导出为 CSV
         output = StringIO()
         writer = csv.writer(output)
         writer.writerow(["手机号", "解析时间", "报告文本长度", "报告文本摘要"])
@@ -560,11 +641,71 @@ async def export_raw_reports(
             headers={"Content-Disposition": f"attachment; filename=raw_reports_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"}
         )
     else:
-        # 导出为 JSON（完整数据）
         json_str = json.dumps(reports, ensure_ascii=False, indent=2)
-        
         return StreamingResponse(
             iter([json_str.encode('utf-8')]),
             media_type="application/json",
             headers={"Content-Disposition": f"attachment; filename=raw_reports_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"}
         )
+
+
+# ========== 补单管理接口 ==========
+@router.get("/admin/order_detail/{order_id}")
+async def order_detail(order_id: str, _=Depends(auth.verify_admin_request)):
+    """查询订单详情"""
+    order = database.get_order_by_id(order_id)
+    if not order:
+        raise HTTPException(404, detail="订单不存在")
+    
+    # 转换 datetime 为字符串
+    if order.get("created_at") and isinstance(order["created_at"], datetime):
+        order["created_at"] = order["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+    if order.get("paid_at") and isinstance(order["paid_at"], datetime):
+        order["paid_at"] = order["paid_at"].strftime("%Y-%m-%d %H:%M:%S")
+    
+    return {
+        "order_id": order.get("order_id"),
+        "phone": order.get("phone"),
+        "package_type": order.get("package_type"),
+        "price": order.get("price"),
+        "times": order.get("times"),
+        "status": order.get("status"),
+        "created_at": order.get("created_at"),
+        "paid_at": order.get("paid_at")
+    }
+
+
+@router.post("/admin/manual_recharge")
+async def manual_recharge(order_id: str = Form(...), _=Depends(auth.verify_admin_request)):
+    """手动补单"""
+    order = database.get_order_by_id(order_id)
+    if not order:
+        raise HTTPException(404, detail="订单不存在")
+    
+    if order.get("status") == "paid":
+        raise HTTPException(400, detail="订单已支付，不可重复补单")
+    
+    phone = order.get("phone")
+    times_to_add = order.get("times", 0)
+    
+    if not phone or times_to_add <= 0:
+        raise HTTPException(400, detail="订单信息不完整")
+    
+    # 更新订单状态
+    database.update_order_paid(order_id)
+    
+    # 增加用户次数
+    user = database.get_user_by_phone(phone)
+    if user:
+        new_balance = user.get("balance", 0) + times_to_add
+        database.users_collection.update_one(
+            {"phone": phone},
+            {"$set": {"balance": new_balance}}
+        )
+    else:
+        days_valid = 62 if order.get("package_type") == "month" else 0
+        database.add_or_recharge_user(phone, times_to_add, days_valid)
+    
+    database.add_admin_log("admin", "manual_recharge", phone, f"手动补单 {order_id}，增加{times_to_add}次")
+    
+    return {"success": True, "phone": phone, "times": times_to_add}
