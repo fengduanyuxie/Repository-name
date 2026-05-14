@@ -1,5 +1,5 @@
 # admin_routes.py
-# 管理后台路由（含日志、统计图表、数据导出、补单管理）
+# 管理后台路由（含日志、统计图表、数据导出）
 
 from fastapi import APIRouter, HTTPException, Depends, Form, Query
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -31,7 +31,6 @@ async def admin_page():
         .card{background:#fff;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}
         h1{color:#1e3c72;margin-bottom:24px;border-bottom:2px solid #4a90e2;padding-bottom:12px}
         h2{color:#333;margin-bottom:16px;font-size:18px}
-        h3{color:#555;margin-bottom:12px;font-size:16px}
         .login-box{max-width:400px;margin:100px auto}
         .form-group{margin-bottom:16px}
         label{display:block;margin-bottom:6px;color:#333;font-weight:500}
@@ -69,8 +68,6 @@ async def admin_page():
         .export-box .form-group{flex:1;min-width:180px}
         .export-box button{margin:0}
         .date-input{width:100%}
-        .order-info{background:#f8f9fa;padding:16px;border-radius:12px;margin-top:16px}
-        .order-info p{margin:8px 0}
     </style>
 </head>
 <body>
@@ -118,7 +115,6 @@ async function showAdminPanel() {
                     <button class="tab" onclick="showTab('stats')">📊 使用统计</button>
                     <button class="tab" onclick="showTab('logs')">📝 操作日志</button>
                     <button class="tab" onclick="showTab('export')">📥 数据导出</button>
-                    <button class="tab" onclick="showTab('recharge')">🔧 补单管理</button>
                 </div>
                 <div id="tab-users" class="tab-content active">
                     <h2>➕ 添加/充值用户</h2>
@@ -175,16 +171,6 @@ async function showAdminPanel() {
                         <li>• JSON格式适合程序处理，CSV格式适合Excel打开</li>
                     </ul>
                 </div>
-                <div id="tab-recharge" class="tab-content">
-                    <h2>🔧 补单管理</h2>
-                    <div class="form-group">
-                        <label>订单号</label>
-                        <input type="text" id="orderId" placeholder="请输入订单号" style="width:300px">
-                    </div>
-                    <button onclick="queryOrder()">查询订单</button>
-                    <button onclick="manualRecharge()" id="manualBtn" style="background:#28a745; display:none">手动补单</button>
-                    <div id="orderInfo" class="order-info"></div>
-                </div>
             </div>
         </div>`;
     loadUsers();
@@ -226,7 +212,7 @@ function renderUserList(users) {
     let html = '<table style="width:100%;border-collapse:collapse;">';
     html += '<thead><tr>' +
             '<th>手机号</th><th>API Key</th><th>剩余次数</th><th>有效期</th><th>创建时间</th><th>最后使用</th><th>操作</th>' +
-            '</tr></thead><tbody>';
+            '</td></thead><tbody>';
     for (const u of users) {
         const created = u.created_at ? new Date(u.created_at).toLocaleString('zh-CN') : '-';
         const lastUsed = u.last_used_at ? new Date(u.last_used_at).toLocaleString('zh-CN') : '未使用';
@@ -250,7 +236,7 @@ function renderUserList(users) {
             </td>
         </tr>`;
     }
-    html += '</tbody></table>';
+    html += '</tbody><tr>';
     tableDiv.innerHTML = html;
 }
 
@@ -436,80 +422,6 @@ async function exportData() {
         resultDiv.innerHTML = `❌ 网络错误: ${e.message}`;
     }
 }
-
-// 补单管理功能
-async function queryOrder() {
-    const token = localStorage.getItem(tokenKey);
-    const orderId = document.getElementById('orderId').value.trim();
-    const orderInfoDiv = document.getElementById('orderInfo');
-    const manualBtn = document.getElementById('manualBtn');
-    
-    if (!orderId) {
-        orderInfoDiv.innerHTML = '<p style="color:#dc3545">请输入订单号</p>';
-        return;
-    }
-    
-    orderInfoDiv.innerHTML = '查询中...';
-    manualBtn.style.display = 'none';
-    
-    try {
-        const resp = await fetch(`/admin/order_detail/${orderId}`, { headers: {'Authorization': `Bearer ${token}`} });
-        const data = await resp.json();
-        
-        if (!resp.ok) {
-            orderInfoDiv.innerHTML = `<p style="color:#dc3545">❌ ${data.detail || '订单不存在'}</p>`;
-            return;
-        }
-        
-        const statusText = data.status === 'paid' ? '✅ 已支付' : '⏳ 待支付';
-        const statusColor = data.status === 'paid' ? '#2e7d32' : '#ed6c02';
-        
-        orderInfoDiv.innerHTML = `
-            <p><strong>订单号：</strong>${data.order_id}</p>
-            <p><strong>手机号：</strong>${data.phone || '-'}</p>
-            <p><strong>套餐：</strong>${data.package_type === 'trial' ? '次卡' : '月卡'}</p>
-            <p><strong>金额：</strong>¥${data.price}</p>
-            <p><strong>次数：</strong>${data.times}次</p>
-            <p><strong>状态：</strong><span style="color:${statusColor}">${statusText}</span></p>
-            <p><strong>创建时间：</strong>${data.created_at || '-'}</p>
-        `;
-        
-        if (data.status !== 'paid') {
-            manualBtn.style.display = 'inline-block';
-            manualBtn.onclick = () => manualRecharge(orderId);
-        } else {
-            manualBtn.style.display = 'none';
-        }
-    } catch(e) {
-        orderInfoDiv.innerHTML = `<p style="color:#dc3545">网络错误: ${e.message}</p>`;
-    }
-}
-
-async function manualRecharge(orderId) {
-    const token = localStorage.getItem(tokenKey);
-    if (!confirm(`确认手动补单 ${orderId} 吗？`)) return;
-    
-    try {
-        const resp = await fetch('/admin/manual_recharge', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/x-www-form-urlencoded', 'Authorization': `Bearer ${token}`},
-            body: new URLSearchParams({order_id: orderId})
-        });
-        const data = await resp.json();
-        
-        if (resp.ok) {
-            alert(`✅ 补单成功！已为用户添加 ${data.times} 次`);
-            queryOrder();
-            loadUsers();
-            loadStats();
-            loadLogs();
-        } else {
-            alert(`❌ ${data.detail || '补单失败'}`);
-        }
-    } catch(e) {
-        alert(`网络错误: ${e.message}`);
-    }
-}
 </script>
 </body>
 </html>
@@ -647,65 +559,3 @@ async def export_raw_reports(
             media_type="application/json",
             headers={"Content-Disposition": f"attachment; filename=raw_reports_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"}
         )
-
-
-# ========== 补单管理接口 ==========
-@router.get("/admin/order_detail/{order_id}")
-async def order_detail(order_id: str, _=Depends(auth.verify_admin_request)):
-    """查询订单详情"""
-    order = database.get_order_by_id(order_id)
-    if not order:
-        raise HTTPException(404, detail="订单不存在")
-    
-    # 转换 datetime 为字符串
-    if order.get("created_at") and isinstance(order["created_at"], datetime):
-        order["created_at"] = order["created_at"].strftime("%Y-%m-%d %H:%M:%S")
-    if order.get("paid_at") and isinstance(order["paid_at"], datetime):
-        order["paid_at"] = order["paid_at"].strftime("%Y-%m-%d %H:%M:%S")
-    
-    return {
-        "order_id": order.get("order_id"),
-        "phone": order.get("phone"),
-        "package_type": order.get("package_type"),
-        "price": order.get("price"),
-        "times": order.get("times"),
-        "status": order.get("status"),
-        "created_at": order.get("created_at"),
-        "paid_at": order.get("paid_at")
-    }
-
-
-@router.post("/admin/manual_recharge")
-async def manual_recharge(order_id: str = Form(...), _=Depends(auth.verify_admin_request)):
-    """手动补单"""
-    order = database.get_order_by_id(order_id)
-    if not order:
-        raise HTTPException(404, detail="订单不存在")
-    
-    if order.get("status") == "paid":
-        raise HTTPException(400, detail="订单已支付，不可重复补单")
-    
-    phone = order.get("phone")
-    times_to_add = order.get("times", 0)
-    
-    if not phone or times_to_add <= 0:
-        raise HTTPException(400, detail="订单信息不完整")
-    
-    # 更新订单状态
-    database.update_order_paid(order_id)
-    
-    # 增加用户次数
-    user = database.get_user_by_phone(phone)
-    if user:
-        new_balance = user.get("balance", 0) + times_to_add
-        database.users_collection.update_one(
-            {"phone": phone},
-            {"$set": {"balance": new_balance}}
-        )
-    else:
-        days_valid = 62 if order.get("package_type") == "month" else 0
-        database.add_or_recharge_user(phone, times_to_add, days_valid)
-    
-    database.add_admin_log("admin", "manual_recharge", phone, f"手动补单 {order_id}，增加{times_to_add}次")
-    
-    return {"success": True, "phone": phone, "times": times_to_add}

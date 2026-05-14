@@ -219,7 +219,7 @@ def extract_queries(text: str, report_date: datetime) -> Dict[str, int]:
     
     # ========== 机构查询 ==========
     pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
-    pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</tr>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
+    pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
     
     matches = re.findall(pattern_with_id, text)
     if not matches:
@@ -248,7 +248,7 @@ def extract_queries(text: str, report_date: datetime) -> Dict[str, int]:
             pass
     
     # ========== 本人查询 ==========
-    self_pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)<tr>\s*<td[^>]*>本人</td>'
+    self_pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
     self_pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
     
     self_matches = re.findall(self_pattern_with_id, text)

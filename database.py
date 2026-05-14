@@ -1,5 +1,5 @@
 # database.py
-# MongoDB 数据库操作（含日志、统计、有效期、充值订单、临时存储）
+# MongoDB 数据库操作（含日志、统计、有效期、临时存储）
 
 from datetime import datetime, timedelta
 from typing import Dict, Any, Tuple, List, Optional
@@ -11,12 +11,11 @@ db = None
 users_collection = None
 logs_collection = None
 stats_collection = None
-recharge_orders_collection = None
 temp_reports_collection = None
 
 def init_db():
     """初始化数据库连接"""
-    global mongo_client, db, users_collection, logs_collection, stats_collection, recharge_orders_collection, temp_reports_collection
+    global mongo_client, db, users_collection, logs_collection, stats_collection, temp_reports_collection
     if not config.MONGO_URI:
         print("警告: MONGO_URI 未设置")
         return False
@@ -27,7 +26,6 @@ def init_db():
         users_collection = db["users"]
         logs_collection = db["admin_logs"]
         stats_collection = db["usage_stats"]
-        recharge_orders_collection = db["recharge_orders"]
         temp_reports_collection = db["temp_reports"]
         
         users_collection.create_index("phone", unique=True)
@@ -35,8 +33,6 @@ def init_db():
         users_collection.create_index("expire_at")
         logs_collection.create_index("created_at")
         stats_collection.create_index("date", unique=True)
-        recharge_orders_collection.create_index("order_id", unique=True)
-        # TTL 索引：24小时后自动删除临时报告
         temp_reports_collection.create_index("expires_at", expireAfterSeconds=0)
         
         print("MongoDB 连接成功")
@@ -182,51 +178,6 @@ def get_usage_stats(days: int = 30):
         {"_id": 0}
     ).sort("date", 1))
 
-# ========== 充值订单 ==========
-def create_recharge_order(phone: str, package_type: str, price: float, times: int) -> str:
-    """创建充值订单，返回订单号"""
-    import secrets
-    order_id = f"ORD{datetime.now().strftime('%Y%m%d%H%M%S')}{secrets.token_hex(4)}".upper()
-    
-    if recharge_orders_collection is None:
-        return None
-    
-    recharge_orders_collection.insert_one({
-        "order_id": order_id,
-        "phone": phone,
-        "package_type": package_type,
-        "price": price,
-        "times": times,
-        "status": "pending",
-        "created_at": datetime.now()
-    })
-    return order_id
-
-def update_order_paid(order_id: str) -> bool:
-    """更新订单为已支付"""
-    if recharge_orders_collection is None:
-        return False
-    result = recharge_orders_collection.update_one(
-        {"order_id": order_id},
-        {"$set": {"status": "paid", "paid_at": datetime.now()}}
-    )
-    return result.modified_count > 0
-
-def get_order_by_id(order_id: str):
-    """获取订单信息"""
-    if recharge_orders_collection is None:
-        return None
-    return recharge_orders_collection.find_one({"order_id": order_id}, {"_id": 0})
-
-def get_orders_by_phone(phone: str, limit: int = 50):
-    """获取用户的所有订单"""
-    if recharge_orders_collection is None:
-        return []
-    return list(recharge_orders_collection.find(
-        {"phone": phone},
-        {"_id": 0}
-    ).sort("created_at", -1).limit(limit))
-
 # ========== 临时存储（MongoDB TTL）==========
 def save_temp_report(temp_id: str, report_content: str, phone: str = None, api_key: str = None):
     """保存临时报告，24小时后自动过期"""
@@ -253,12 +204,3 @@ def delete_temp_report(temp_id: str):
     if temp_reports_collection is None:
         return
     temp_reports_collection.delete_one({"temp_id": temp_id})
-
-def update_temp_report_phone(temp_id: str, phone: str, api_key: str):
-    """更新临时报告关联的用户信息"""
-    if temp_reports_collection is None:
-        return
-    temp_reports_collection.update_one(
-        {"temp_id": temp_id},
-        {"$set": {"phone": phone, "api_key": api_key}}
-    )

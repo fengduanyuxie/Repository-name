@@ -44,7 +44,7 @@ ALIPAY_PUBLIC_KEY = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkhreIO9LDDvfx9P
 # 初始化支付宝客户端
 alipay = AliPay(
     appid=ALIPAY_APPID,
-    app_notify_url=None,  # 同步回调，不需要异步通知
+    app_notify_url=None,
     app_private_key_string=ALIPAY_APP_PRIVATE_KEY,
     alipay_public_key_string=ALIPAY_PUBLIC_KEY,
     sign_type="RSA2",
@@ -92,7 +92,7 @@ async def analyze(
     phone: str = Header(None),
     api_key: str = Header(None)
 ):
-    """分析接口 - 支持免费试用和付费"""
+    """分析接口 - 支持新用户直接上传，老用户API Key验证"""
     # 频率限制
     if phone and not auth.rate_limit(phone, limit=10, window=60):
         remaining = auth.get_rate_limit_remaining(phone, limit=10, window=60)
@@ -151,9 +151,9 @@ async def analyze(
         except Exception as e:
             print(f"保存原始数据失败: {e}")
         
-        # 判断用户状态
+        # ========== 用户状态判断 ==========
         if phone and api_key:
-            # 验证用户是否存在及有效期
+            # 老用户：验证API Key
             exists, user, balance = database.verify_user_exists(phone, api_key)
             
             if not exists:
@@ -163,12 +163,10 @@ async def analyze(
                 )
             
             if balance == 0:
-                # 次数用完，返回付费二维码
+                # 次数用完，返回支付二维码
                 order_id = f"ORDER_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
-                # 保存临时报告和订单信息
                 database.save_temp_report(order_id, report_content, phone, api_key)
                 
-                # 创建支付宝支付订单
                 pay_result = alipay.api_alipay_trade_precreate(
                     out_trade_no=order_id,
                     total_amount="19.90",
@@ -180,7 +178,7 @@ async def analyze(
                     qr_code = pay_result.get("qr_code", "")
                     return JSONResponse({
                         "code": "NEED_PAY",
-                        "message": "次数为0，请支付后继续使用",
+                        "message": "次数已用完，请支付后继续使用",
                         "order_id": order_id,
                         "qr_code": qr_code,
                         "amount": "19.90"
@@ -191,7 +189,7 @@ async def analyze(
                         content={"code": "PAY_ERROR", "message": f"创建支付订单失败: {pay_result.get('msg', '未知错误')}"}
                     )
             
-            # 有效用户，扣费并返回报告
+            # 有效用户，扣费并返回完整报告
             database.consume_balance(phone, api_key)
             user_data = database.get_user_by_phone(phone)
             expire_date = user_data.get('expire_at', '永久')
@@ -207,26 +205,65 @@ async def analyze(
 
 {report_content}
 
-💡 API Key获取请联系管理员（微信:DXNBZ579）"""
+💡 如需多次分析，请联系管理员定制套餐（微信:DXNBZ579）"""
             
             return JSONResponse({"success": True, "full_report": final_report})
         
         else:
-            # 未提供凭证，直接返回报告（免费试用一次）
-            # 生成临时API Key给新用户
-            temp_api_key = f"temp_{uuid.uuid4().hex[:16]}"
-            final_report = f"""让您久等了，您的专属征信解读报告已生成，请查阅~
-
-🔑 **临时API Key**: `{temp_api_key}`
-💰 **剩余次数**: 0（此为免费试用报告）
-📅 **有效期至**: 今日
-> ⚠️ **请保存此API Key，后续需充值后方可继续使用**
-
-{report_content}
-
-💡 API Key获取请联系管理员（微信:DXNBZ579）"""
+            # 新用户：无API Key，先展示报告摘要 + 支付提示
+            # 生成临时ID关联这份报告
+            temp_id = f"TEMP_{uuid.uuid4().hex[:16]}"
+            database.save_temp_report(temp_id, report_content)
             
-            return JSONResponse({"success": True, "full_report": final_report, "temp_api_key": temp_api_key})
+            # 只返回第一部分（简要汇总），第二部分隐藏
+            summary_only = f"""【第一部分：简要汇总】
+
+{part1}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️ **完整报告包含「结构分析」部分，需支付 19.9 元后查看**
+
+💡 支付完成后，系统将自动为您生成API Key，并展示完整分析报告
+
+---
+
+**请扫描下方二维码支付 19.9 元：**
+
+> （支付二维码将显示在此处）
+
+支付完成后，请点击下方按钮获取完整报告：
+
+[我已支付，获取完整报告]
+"""
+            
+            # 创建支付订单
+            order_id = f"ORDER_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
+            database.save_temp_report(order_id, report_content)
+            
+            pay_result = alipay.api_alipay_trade_precreate(
+                out_trade_no=order_id,
+                total_amount="19.90",
+                subject="征信报告分析服务",
+                body="个人简版信用报告专业分析"
+            )
+            
+            if pay_result.get("code") == "10000":
+                qr_code = pay_result.get("qr_code", "")
+                return JSONResponse({
+                    "code": "NEED_PAY",
+                    "message": "请支付后查看完整报告",
+                    "temp_id": temp_id,
+                    "order_id": order_id,
+                    "qr_code": qr_code,
+                    "amount": "19.90",
+                    "summary": summary_only
+                })
+            else:
+                return JSONResponse(
+                    status_code=500,
+                    content={"code": "PAY_ERROR", "message": f"创建支付订单失败: {pay_result.get('msg', '未知错误')}"}
+                )
             
     except HTTPException:
         raise
@@ -244,14 +281,6 @@ async def pay_callback(request: Request):
     form_data = await request.form()
     params = dict(form_data)
     
-    # 验证签名
-    try:
-        from alipay import AliPay
-        # 支付宝会自动验证，这里简化处理
-        pass
-    except:
-        pass
-    
     order_id = params.get("out_trade_no")
     trade_status = params.get("trade_status")
     
@@ -265,30 +294,73 @@ async def pay_callback(request: Request):
     
     phone = temp_data.get("phone")
     api_key = temp_data.get("api_key")
-    report_content = temp_data.get("report")
     
     if phone and api_key:
-        # 充值用户次数（根据支付金额19.9元 = 1次）
+        # 老用户充值
         database.add_or_recharge_user(phone, 1, 62)
-        database.delete_temp_report(order_id)
+    else:
+        # 新用户：生成API Key并充值
+        # phone 需要从其他地方获取，这里简化处理
+        # 实际应该让用户输入手机号
+        pass
+    
+    database.delete_temp_report(order_id)
     
     return "success"
 
 
-@router.post("/api/check_pay_status")
-async def check_pay_status(order_id: str):
-    """查询支付状态"""
-    temp_data = database.get_temp_report(order_id)
-    if not temp_data:
-        return JSONResponse({"status": "not_found", "message": "订单不存在"})
+@router.post("/api/claim_report")
+async def claim_report(request: Request):
+    """支付后获取完整报告（新用户）"""
+    body = await request.json()
+    phone = body.get("phone")
+    temp_id = body.get("temp_id")
+    order_id = body.get("order_id")
     
-    # 查询支付宝订单状态
+    if not phone or not temp_id:
+        return JSONResponse(
+            status_code=400,
+            content={"code": "MISSING_PARAMS", "message": "参数错误"}
+        )
+    
+    # 查询订单支付状态
     result = alipay.api_alipay_trade_query(out_trade_no=order_id)
     
-    if result.get("code") == "10000" and result.get("trade_status") == "TRADE_SUCCESS":
-        return JSONResponse({"status": "paid"})
-    else:
-        return JSONResponse({"status": "pending"})
+    if result.get("code") != "10000" or result.get("trade_status") != "TRADE_SUCCESS":
+        return JSONResponse(
+            status_code=402,
+            content={"code": "NOT_PAID", "message": "订单未支付，请先完成支付"}
+        )
+    
+    # 获取临时报告
+    temp_data = database.get_temp_report(temp_id)
+    if not temp_data:
+        return JSONResponse(
+            status_code=404,
+            content={"code": "REPORT_EXPIRED", "message": "报告已过期，请重新上传"}
+        )
+    
+    # 为用户创建账号并充值1次
+    api_key, new_balance = database.add_or_recharge_user(phone, 1, 62)
+    
+    # 删除临时报告
+    database.delete_temp_report(temp_id)
+    database.delete_temp_report(order_id)
+    
+    report_content = temp_data.get("report", "")
+    
+    final_report = f"""让您久等了，您的专属征信解读报告已生成，请查阅~
+
+🔑 **您的API Key**: `{api_key}`
+💰 **剩余次数**: {new_balance}
+📅 **有效期至**: 62天内有效
+> ⚠️ **请务必保存好您的API Key！**
+
+{report_content}
+
+💡 如需多次分析，请联系管理员定制套餐（微信:DXNBZ579）"""
+    
+    return JSONResponse({"success": True, "full_report": final_report, "api_key": api_key})
 
 
 @router.get("/api/verify")
@@ -311,4 +383,4 @@ async def get_balance(phone: str, api_key: str):
 @router.get("/api/health")
 async def health():
     db_status = "connected" if database.users_collection is not None else "disconnected"
-    return {"status": "ok", "version": "v051214", "database": db_status}
+    return {"status": "ok", "version": "v0514_final", "database": db_status}
