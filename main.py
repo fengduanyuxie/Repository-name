@@ -78,6 +78,7 @@ async def frontend():
         .wechat-id{font-size:16px;font-weight:bold;color:#1e3c72;letter-spacing:1px}
         .copy-wechat-btn{background:#28a745;color:#fff;border:none;padding:4px 12px;border-radius:20px;font-size:12px;cursor:pointer}
         .copy-wechat-btn:hover{background:#218838}
+        .blue-text{color:#4a90e2}
     </style>
 </head>
 <body>
@@ -96,7 +97,7 @@ async def frontend():
     
     <div class="upload-area" id="uploadArea">
         <div class="upload-icon">📎</div>
-        <div class="upload-text">点击或拖拽上传<strong>简版</strong>信用报告（PDF）</div>
+        <div class="upload-text">点击或拖拽上传<span class="blue-text"><strong>简版</strong></span>信用报告（PDF）</div>
         <div class="file-name" id="fileName"></div>
         <input type="file" id="fileInput" accept=".pdf" style="display:none">
     </div>
@@ -123,7 +124,7 @@ async def frontend():
     </div>
     
     <div class="info-note">
-        💡 19.9元/次 | 定制VIP套餐请联系管理员<br>
+        💡 19.9元/次 | API Key获取请联系管理员<br>
         <div class="wechat-copy">
             <span class="wechat-id">📱 微信号：DXNBZ579</span>
             <button class="copy-wechat-btn" id="copyWechatBtn">复制</button>
@@ -265,7 +266,7 @@ async def frontend():
     
     function reset() {
         document.querySelector('.upload-icon').innerHTML = '📎';
-        document.querySelector('.upload-text').innerHTML = '点击或拖拽上传<strong>简版</strong>信用报告（PDF）';
+        document.querySelector('.upload-text').innerHTML = '点击或拖拽上传<span class="blue-text"><strong>简版</strong></span>信用报告（PDF）';
         fileNameSpan.innerHTML = '';
         selectedFile = null;
         analyzeBtn.disabled = true;
