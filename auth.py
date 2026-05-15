@@ -40,13 +40,7 @@ def verify_admin_request(authorization: Optional[str] = Header(None)):
     return True
 
 def rate_limit(phone: str, limit: int = 10, window: int = 60) -> bool:
-    """
-    频率限制
-    :param phone: 手机号
-    :param limit: 限制次数
-    :param window: 时间窗口（秒）
-    :return: 是否允许
-    """
+    """频率限制"""
     now = datetime.now()
     key = f"rate_limit_{phone}"
     

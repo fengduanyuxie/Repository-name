@@ -212,7 +212,7 @@ function renderUserList(users) {
     let html = '<table style="width:100%;border-collapse:collapse;">';
     html += '<thead><tr>' +
             '<th>手机号</th><th>API Key</th><th>剩余次数</th><th>有效期</th><th>创建时间</th><th>最后使用</th><th>操作</th>' +
-            '</td></thead><tbody>';
+            '</table></thead><tbody>';
     for (const u of users) {
         const created = u.created_at ? new Date(u.created_at).toLocaleString('zh-CN') : '-';
         const lastUsed = u.last_used_at ? new Date(u.last_used_at).toLocaleString('zh-CN') : '未使用';
@@ -236,7 +236,7 @@ function renderUserList(users) {
             </td>
         </tr>`;
     }
-    html += '</tbody><tr>';
+    html += '</tbody><table>';
     tableDiv.innerHTML = html;
 }
 

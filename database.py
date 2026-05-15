@@ -1,5 +1,5 @@
 # database.py
-# MongoDB 数据库操作（含日志、统计、有效期、临时存储、订单表）
+# MongoDB 数据库操作（含日志、统计、有效期、临时存储）
 
 from datetime import datetime, timedelta
 from typing import Dict, Any, Tuple, List, Optional
@@ -12,11 +12,10 @@ users_collection = None
 logs_collection = None
 stats_collection = None
 temp_reports_collection = None
-orders_collection = None
 
 def init_db():
     """初始化数据库连接"""
-    global mongo_client, db, users_collection, logs_collection, stats_collection, temp_reports_collection, orders_collection
+    global mongo_client, db, users_collection, logs_collection, stats_collection, temp_reports_collection
     if not config.MONGO_URI:
         print("警告: MONGO_URI 未设置")
         return False
@@ -28,7 +27,6 @@ def init_db():
         logs_collection = db["admin_logs"]
         stats_collection = db["usage_stats"]
         temp_reports_collection = db["temp_reports"]
-        orders_collection = db["orders"]
         
         users_collection.create_index("phone", unique=True)
         users_collection.create_index("api_key", unique=True)
@@ -36,10 +34,6 @@ def init_db():
         logs_collection.create_index("created_at")
         stats_collection.create_index("date", unique=True)
         temp_reports_collection.create_index("expires_at", expireAfterSeconds=0)
-        orders_collection.create_index("order_id", unique=True)
-        orders_collection.create_index("out_trade_no")
-        orders_collection.create_index("trade_no")
-        orders_collection.create_index("status")
         
         print("MongoDB 连接成功")
         return True
@@ -210,112 +204,3 @@ def delete_temp_report(temp_id: str):
     if temp_reports_collection is None:
         return
     temp_reports_collection.delete_one({"temp_id": temp_id})
-
-def update_temp_report_phone(temp_id: str, phone: str, api_key: str):
-    """更新临时报告关联的用户信息"""
-    if temp_reports_collection is None:
-        return
-    temp_reports_collection.update_one(
-        {"temp_id": temp_id},
-        {"$set": {"phone": phone, "api_key": api_key}}
-    )
-
-# ========== 订单表（A2M支付）==========
-def create_order(
-    order_id: str,
-    out_trade_no: str,
-    phone: str,
-    amount: str,
-    resource_id: str,
-    temp_id: str = None,
-    expires_minutes: int = 30
-) -> bool:
-    """创建订单"""
-    if orders_collection is None:
-        return False
-    expires_at = datetime.now() + timedelta(minutes=expires_minutes)
-    orders_collection.insert_one({
-        "order_id": order_id,
-        "out_trade_no": out_trade_no,
-        "trade_no": None,
-        "phone": phone,
-        "amount": amount,
-        "resource_id": resource_id,
-        "temp_id": temp_id,
-        "status": "pending",  # pending, paid, fulfilled
-        "created_at": datetime.now(),
-        "expires_at": expires_at,
-        "paid_at": None,
-        "fulfilled_at": None
-    })
-    return True
-
-def get_order_by_out_trade_no(out_trade_no: str):
-    """根据商户订单号获取订单"""
-    if orders_collection is None:
-        return None
-    return orders_collection.find_one({"out_trade_no": out_trade_no}, {"_id": 0})
-
-def get_order_by_trade_no(trade_no: str):
-    """根据支付宝交易号获取订单"""
-    if orders_collection is None:
-        return None
-    return orders_collection.find_one({"trade_no": trade_no}, {"_id": 0})
-
-def update_order_paid(out_trade_no: str, trade_no: str) -> bool:
-    """更新订单为已支付"""
-    if orders_collection is None:
-        return False
-    result = orders_collection.update_one(
-        {"out_trade_no": out_trade_no, "status": "pending"},
-        {"$set": {
-            "status": "paid",
-            "trade_no": trade_no,
-            "paid_at": datetime.now()
-        }}
-    )
-    return result.modified_count > 0
-
-def update_order_fulfilled(out_trade_no: str) -> bool:
-    """更新订单为已履约"""
-    if orders_collection is None:
-        return False
-    result = orders_collection.update_one(
-        {"out_trade_no": out_trade_no, "status": "paid"},
-        {"$set": {
-            "status": "fulfilled",
-            "fulfilled_at": datetime.now()
-        }}
-    )
-    return result.modified_count > 0
-
-def get_orders_by_phone(phone: str, limit: int = 50):
-    """获取用户的所有订单"""
-    if orders_collection is None:
-        return []
-    return list(orders_collection.find(
-        {"phone": phone},
-        {"_id": 0}
-    ).sort("created_at", -1).limit(limit))
-
-def is_order_already_fulfilled(out_trade_no: str) -> bool:
-    """检查订单是否已履约（防重放）"""
-    if orders_collection is None:
-        return False
-    order = orders_collection.find_one({"out_trade_no": out_trade_no})
-    return order and order.get("status") in ["paid", "fulfilled"]
-# ========== 订单表查询方法（追加到 database.py 末尾）==========
-
-def get_order_by_out_trade_no(out_trade_no: str):
-    """根据商户订单号获取订单"""
-    if orders_collection is None:
-        return None
-    return orders_collection.find_one({"out_trade_no": out_trade_no}, {"_id": 0})
-
-
-def is_order_already_fulfilled(out_trade_no: str) -> bool:
-    """检查订单是否已履约（防重放）"""
-    if orders_collection is None:
-        return False
-    order = orders_collection.find_one({"out_trade_no": out_trade_no})
-    return order and order.get("status") in ["paid", "fulfilled"]
