@@ -1,5 +1,5 @@
 # main.py
-# 征信报告分析系统 - 主入口（最终版 v0515）
+# 征信报告分析系统 - 主入口（最终优化版）
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,15 +36,12 @@ async def frontend():
         *{margin:0;padding:0;box-sizing:border-box}
         body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f5f7fa;padding:16px}
         .container{max-width:600px;margin:0 auto;background:#fff;border-radius:24px;padding:20px;box-shadow:0 4px 20px rgba(0,0,0,0.08)}
-        h1{color:#1e3c72;border-bottom:3px solid #4a90e2;padding-bottom:12px;margin-bottom:16px;font-size:22px}
-        .desc{color:#666;font-size:14px;margin-bottom:20px;line-height:1.6}
-        .desc strong{color:#1e3c72;font-weight:700}
-        .auth-box{background:#f0f2f5;border-radius:12px;padding:16px;margin-bottom:20px}
+        h1{color:#1e3c72;border-bottom:3px solid #4a90e2;padding-bottom:12px;margin-bottom:12px;font-size:22px}
+        .auth-box{background:#f0f2f5;border-radius:12px;padding:16px;margin-bottom:16px}
         .auth-box input{width:100%;padding:10px;margin-bottom:10px;border:1px solid #ddd;border-radius:8px;font-size:14px}
-        .remember-row{display:flex;justify-content:space-between;align-items:center;margin-top:8px;flex-wrap:wrap;gap:8px}
+        .remember-row{display:flex;justify-content:flex-start;align-items:center;margin-top:4px;margin-bottom:0;gap:8px}
         .remember-row label{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#666;cursor:pointer;white-space:nowrap}
         .remember-row input{width:auto;margin:0}
-        .clear-btn{background:none;border:none;color:#dc3545;font-size:12px;cursor:pointer}
         .upload-area{border:2px dashed #4a90e2;border-radius:20px;padding:30px 20px;text-align:center;cursor:pointer;margin:16px 0;transition:all 0.3s}
         .upload-area:hover{background:#eef4ff;border-color:#357abd}
         .upload-icon{font-size:48px;margin-bottom:12px}
@@ -85,29 +82,27 @@ async def frontend():
         .pay-content{background:#fff;border-radius:24px;padding:24px;text-align:center;max-width:320px;width:90%}
         .pay-content img{width:100%;max-width:200px;margin:16px 0;border:1px solid #ddd;border-radius:12px;padding:12px}
         .pay-amount{font-size:24px;font-weight:bold;color:#4a90e2;margin:8px 0}
-        .phone-input{margin:16px 0}
-        .phone-input input{width:100%;padding:12px;border:1px solid #ddd;border-radius:12px;font-size:16px}
+        .pay-phone-input{margin:16px 0}
+        .pay-phone-input input{width:100%;padding:12px;border:1px solid #ddd;border-radius:12px;font-size:16px}
     </style>
 </head>
 <body>
 <div class="container">
     <h1>📄 征信结构解读</h1>
-    <p class="desc">请上传个人<strong>简版</strong>信用报告（PDF），首次使用需支付19.9元/次</p>
     
     <div class="auth-box">
-        <input type="tel" id="phone" placeholder="手机号（已付费用户必填）" autocomplete="off">
-        <input type="text" id="apiKey" placeholder="API Key（已付费用户必填）" autocomplete="off">
+        <input type="tel" id="phone" placeholder="手机号（VIP用户必填）" autocomplete="off">
+        <input type="text" id="apiKey" placeholder="API Key（VIP用户必填）" autocomplete="off">
         <div class="remember-row">
             <label>
                 <input type="checkbox" id="rememberMe"> 记住我
             </label>
-            <button id="clearRememberBtn" class="clear-btn">清除记录</button>
         </div>
     </div>
     
     <div class="upload-area" id="uploadArea">
         <div class="upload-icon">📎</div>
-        <div class="upload-text">点击或拖拽上传PDF文件</div>
+        <div class="upload-text">点击或拖拽上传简版信用报告（PDF）</div>
         <div class="file-name" id="fileName"></div>
         <input type="file" id="fileInput" accept=".pdf" style="display:none">
     </div>
@@ -135,12 +130,36 @@ async def frontend():
         <div class="result" id="result"></div>
     </div>
     <div class="info-note">
-        💡 定价：19.9元/次 | 如需多次分析，请联系管理员定制套餐
-        <a href="javascript:void(0)" id="showWechatQrcode" style="color:#4a90e2;text-decoration:underline;display:block;margin-top:8px;">📱 联系管理员（微信:DXNBZ579）</a>
+        💡 定价：19.9元/次 | 定制VIP套餐请联系
+        <a href="javascript:void(0)" id="showWechatQrcode" style="color:#4a90e2;text-decoration:underline;display:block;margin-top:8px;">📱 管理员微信:DXNBZ579</a>
     </div>
 </div>
 
-<!-- 二维码弹窗（使用 static 目录下的图片） -->
+<!-- 支付弹窗 -->
+<div id="payModal" class="pay-modal">
+    <div class="pay-content">
+        <h3>💰 需要支付</h3>
+        <div class="pay-amount">¥19.90</div>
+        <p style="font-size:12px;color:#666">征信报告分析服务</p>
+        <div class="pay-phone-input">
+            <input type="tel" id="payPhone" placeholder="请输入您的手机号">
+        </div>
+        <div id="payQrcodeArea" style="display:none">
+            <img id="payQrcode" src="" alt="支付二维码" style="width:100%;max-width:200px">
+        </div>
+        <div id="payLoading" style="display:none">
+            <p>⏳ 等待支付确认中...</p>
+            <p style="font-size:12px;color:#999">请勿关闭页面</p>
+        </div>
+        <button id="paySubmitBtn" style="margin-top:16px;padding:10px 20px;background:#4a90e2;color:#fff;border:none;border-radius:40px;cursor:pointer">确认支付</button>
+        <button id="closePayModal" style="margin-top:12px;padding:8px 16px;background:#6c757d;color:#fff;border:none;border-radius:40px;cursor:pointer">取消</button>
+    </div>
+</div>
+
+<div id="copySuccess" class="copy-success">✅ 已复制到剪贴板</div>
+<div id="toast" class="toast"></div>
+
+<!-- 二维码弹窗 -->
 <div id="qrcodeModal" class="qrcode-modal">
     <div class="qrcode-content">
         <img src="/static/wechat_qrcode.png" alt="管理员微信二维码" style="width:100%;max-width:200px;border-radius:12px">
@@ -164,13 +183,23 @@ async def frontend():
     const copyBtn = document.getElementById('copyBtn');
     const copySuccess = document.getElementById('copySuccess');
     const rememberCheckbox = document.getElementById('rememberMe');
-    const clearRememberBtn = document.getElementById('clearRememberBtn');
     const progressContainer = document.getElementById('progressContainer');
     const progressFill = document.getElementById('progressFill');
     const progressText = document.getElementById('progressText');
     
+    // 支付弹窗元素
+    const payModal = document.getElementById('payModal');
+    const payPhone = document.getElementById('payPhone');
+    const payQrcodeArea = document.getElementById('payQrcodeArea');
+    const payQrcode = document.getElementById('payQrcode');
+    const payLoading = document.getElementById('payLoading');
+    const paySubmitBtn = document.getElementById('paySubmitBtn');
+    const closePayModal = document.getElementById('closePayModal');
+    
     let selectedFile = null;
     let currentReport = '';
+    let currentOutTradeNo = null;
+    let pollingInterval = null;
     
     // 二维码弹窗控制
     const qrcodeModal = document.getElementById('qrcodeModal');
@@ -189,20 +218,14 @@ async def frontend():
     
     // Toast 提示
     function showToast(message, type = 'info') {
-        let toast = document.getElementById('toast');
-        if (!toast) {
-            toast = document.createElement('div');
-            toast.id = 'toast';
-            toast.className = 'toast';
-            document.body.appendChild(toast);
-        }
+        const toast = document.getElementById('toast');
         toast.textContent = message;
         toast.className = `toast ${type}`;
         toast.style.display = 'block';
         setTimeout(() => { toast.style.display = 'none'; }, 3000);
     }
     
-    // 记住我功能
+    // 记住我功能（去掉清除按钮）
     function loadSavedCredentials() {
         const savedPhone = localStorage.getItem('saved_phone');
         const savedApiKey = localStorage.getItem('saved_api_key');
@@ -221,14 +244,6 @@ async def frontend():
             localStorage.removeItem('saved_api_key');
         }
     }
-    clearRememberBtn.onclick = () => {
-        localStorage.removeItem('saved_phone');
-        localStorage.removeItem('saved_api_key');
-        phoneInput.value = '';
-        apiKeyInput.value = '';
-        rememberCheckbox.checked = false;
-        showToast('已清除保存的账号信息', 'info');
-    };
     loadSavedCredentials();
     
     // 进度条模拟
@@ -253,47 +268,83 @@ async def frontend():
     }
     function resetProgress() { if (progressInterval) clearInterval(progressInterval); progressContainer.style.display = 'none'; progressFill.style.width = '0%'; }
     
-    // 首次引导
-    const hasVisited = localStorage.getItem('has_visited');
-    if (!hasVisited) {
-        setTimeout(() => { startTour(); }, 500);
-        localStorage.setItem('has_visited', 'true');
+    // 支付轮询
+    function startPolling(outTradeNo, phone) {
+        let count = 0;
+        const maxAttempts = 60; // 3分钟
+        if (pollingInterval) clearInterval(pollingInterval);
+        
+        pollingInterval = setInterval(async () => {
+            count++;
+            if (count > maxAttempts) {
+                clearInterval(pollingInterval);
+                payLoading.innerHTML = '<p>⏰ 支付超时，请重试</p>';
+                setTimeout(() => { closePayModalWindow(); }, 2000);
+                return;
+            }
+            
+            try {
+                const resp = await fetch(`/api/order_status/${outTradeNo}`);
+                const data = await resp.json();
+                
+                if (data.status === 'paid') {
+                    clearInterval(pollingInterval);
+                    payLoading.innerHTML = '<p>✅ 支付成功！正在获取报告...</p>';
+                    
+                    // 获取报告
+                    const claimResp = await fetch('/api/claim_report', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            phone: phone,
+                            temp_id: currentTempId,
+                            out_trade_no: outTradeNo,
+                            trade_no: data.trade_no
+                        })
+                    });
+                    const claimData = await claimResp.json();
+                    
+                    if (claimResp.ok) {
+                        currentReport = claimData.full_report;
+                        resultDiv.innerText = currentReport;
+                        resultContainer.style.display = 'block';
+                        copyBtn.style.display = 'inline-block';
+                        if (claimData.api_key && rememberCheckbox.checked) {
+                            localStorage.setItem('saved_api_key', claimData.api_key);
+                            localStorage.setItem('saved_phone', phone);
+                            apiKeyInput.value = claimData.api_key;
+                            phoneInput.value = phone;
+                        }
+                        showToast('支付成功！报告已生成', 'success');
+                        closePayModalWindow();
+                    } else {
+                        showToast(claimData.message || '获取报告失败', 'error');
+                        closePayModalWindow();
+                    }
+                }
+            } catch(e) {
+                console.error('轮询错误:', e);
+            }
+        }, 3000);
     }
-    let tourStep = 0;
-    const tourSteps = [
-        { element: '.auth-box', title: '🔐 已有账号？', desc: '已付费用户请输入手机号和API Key。新用户请直接上传文件，支付后自动获取API Key。', position: 'top' },
-        { element: '.upload-area', title: '📄 上传报告', desc: '点击或拖拽上传PDF格式的个人简版信用报告。', position: 'bottom' },
-        { element: '#analyzeBtn', title: '🚀 开始分析', desc: '上传完成后，点击开始分析，系统将为您生成专业解读报告。', position: 'bottom' }
-    ];
-    function startTour() {
-        const overlay = document.getElementById('tourOverlay');
-        if (!overlay) return;
-        const card = document.getElementById('tourCard');
-        const titleEl = document.getElementById('tourTitle');
-        const descEl = document.getElementById('tourDesc');
-        tourStep = 0;
-        overlay.style.display = 'flex';
-        showTourStep();
-        document.getElementById('tourNextBtn').onclick = () => { tourStep++; if (tourStep >= tourSteps.length) endTour(); else showTourStep(); };
-        document.getElementById('tourSkipBtn').onclick = () => endTour();
+    
+    function closePayModalWindow() {
+        payModal.style.display = 'none';
+        payQrcodeArea.style.display = 'none';
+        payLoading.style.display = 'none';
+        paySubmitBtn.style.display = 'block';
+        if (pollingInterval) clearInterval(pollingInterval);
     }
-    function showTourStep() {
-        const step = tourSteps[tourStep];
-        const element = document.querySelector(step.element);
-        if (!element) return;
-        const rect = element.getBoundingClientRect();
-        const card = document.getElementById('tourCard');
-        document.getElementById('tourTitle').innerHTML = step.title;
-        document.getElementById('tourDesc').innerHTML = step.desc;
-        let top, left;
-        if (step.position === 'top') { top = rect.top - card.offsetHeight - 10; left = rect.left + (rect.width / 2) - (card.offsetWidth / 2); }
-        else { top = rect.bottom + 10; left = rect.left + (rect.width / 2) - (card.offsetWidth / 2); }
-        card.style.top = Math.max(10, top) + 'px';
-        card.style.left = Math.max(10, left) + 'px';
-        if (tourStep === tourSteps.length - 1) document.getElementById('tourNextBtn').innerHTML = '完成';
-        else document.getElementById('tourNextBtn').innerHTML = '下一步';
+    
+    function showPayModal(qrCode, outTradeNo) {
+        currentOutTradeNo = outTradeNo;
+        payModal.style.display = 'flex';
+        payQrcodeArea.style.display = 'block';
+        payQrcode.src = qrCode;
+        payLoading.style.display = 'none';
+        paySubmitBtn.style.display = 'none';
+        startPolling(outTradeNo, payPhone.value.trim());
     }
-    function endTour() { document.getElementById('tourOverlay').style.display = 'none'; }
     
     // 复制报告
     copyBtn.onclick = () => {
@@ -323,7 +374,7 @@ async def frontend():
     }
     function reset() {
         document.querySelector('.upload-icon').innerHTML = '📎';
-        document.querySelector('.upload-text').innerHTML = '点击或拖拽上传PDF文件';
+        document.querySelector('.upload-text').innerHTML = '点击或拖拽上传简版信用报告（PDF）';
         fileNameSpan.innerHTML = '';
         selectedFile = null;
         analyzeBtn.disabled = true;
@@ -341,83 +392,73 @@ async def frontend():
         if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
     };
     
-    // 支付弹窗
-    let currentOrderId = null;
-    let currentTempId = null;
-    let payInterval = null;
-    
-    function showPayModal(qrCode, orderId, tempId, amount) {
-        currentOrderId = orderId;
-        currentTempId = tempId;
-        let modal = document.getElementById('payModal');
-        if (!modal) {
-            modal = document.createElement('div');
-            modal.id = 'payModal';
-            modal.className = 'pay-modal';
-            modal.innerHTML = `
-                <div class="pay-content">
-                    <h3>💳 扫码支付</h3>
-                    <div class="pay-amount">¥19.90</div>
-                    <img id="payQrcode" src="" alt="支付二维码">
-                    <div class="phone-input">
-                        <input type="tel" id="payPhone" placeholder="请输入您的手机号">
-                    </div>
-                    <p style="font-size:12px;color:#666">支付成功后自动获取API Key</p>
-                    <button id="closePayModal" style="margin-top:16px;padding:8px 20px;background:#6c757d;color:#fff;border:none;border-radius:20px;cursor:pointer">关闭</button>
-                </div>
-            `;
-            document.body.appendChild(modal);
-            document.getElementById('closePayModal').onclick = () => {
-                if (payInterval) clearInterval(payInterval);
-                modal.style.display = 'none';
-            };
+    // 支付弹窗按钮事件
+    paySubmitBtn.onclick = async () => {
+        const phone = payPhone.value.trim();
+        if (!phone) {
+            showToast('请填写手机号', 'error');
+            return;
         }
-        document.getElementById('payQrcode').src = qrCode;
-        modal.style.display = 'flex';
-        // 开始轮询支付状态
-        if (payInterval) clearInterval(payInterval);
-        payInterval = setInterval(async () => {
-            const phone = document.getElementById('payPhone').value.trim();
-            if (!phone) return;
-            try {
-                const resp = await fetch('/api/check_pay_status', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({order_id: orderId})
-                });
-                const data = await resp.json();
-                if (data.status === 'paid') {
-                    clearInterval(payInterval);
-                    modal.style.display = 'none';
-                    // 获取完整报告
-                    const claimResp = await fetch('/api/claim_report', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({phone: phone, temp_id: tempId, order_id: orderId})
-                    });
-                    const claimData = await claimResp.json();
-                    if (claimResp.ok) {
-                        currentReport = claimData.full_report;
-                        resultDiv.innerText = currentReport;
-                        resultContainer.style.display = 'block';
-                        copyBtn.style.display = 'inline-block';
-                        // 保存API Key到记住我
-                        if (rememberCheckbox.checked && claimData.api_key) {
-                            localStorage.setItem('saved_api_key', claimData.api_key);
-                            localStorage.setItem('saved_phone', phone);
-                            apiKeyInput.value = claimData.api_key;
-                            phoneInput.value = phone;
-                        }
-                        showToast('支付成功！报告已生成', 'success');
-                    } else {
-                        showToast(claimData.message || '获取报告失败', 'error');
-                    }
-                }
-            } catch(e) { console.error(e); }
-        }, 3000);
-    }
+        
+        paySubmitBtn.disabled = true;
+        paySubmitBtn.innerText = '创建订单中...';
+        
+        try {
+            // 先上传文件创建订单
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+            
+            const headers = {};
+            const savedPhone = localStorage.getItem('saved_phone');
+            const savedApiKey = localStorage.getItem('saved_api_key');
+            if (savedPhone && savedApiKey) {
+                headers['phone'] = savedPhone;
+                headers['api-key'] = savedApiKey;
+            }
+            
+            const analyzeResp = await fetch('/api/analyze', {
+                method: 'POST',
+                headers: headers,
+                body: formData
+            });
+            const analyzeData = await analyzeResp.json();
+            
+            if (analyzeResp.status === 402 && analyzeData.out_trade_no) {
+                // 显示支付二维码
+                payQrcodeArea.style.display = 'block';
+                payLoading.style.display = 'none';
+                paySubmitBtn.style.display = 'none';
+                // 这里需要获取二维码，实际需要从支付宝获取
+                showToast('订单已创建，请扫码支付', 'info');
+                startPolling(analyzeData.out_trade_no, phone);
+            } else if (analyzeResp.ok && analyzeData.full_report) {
+                currentReport = analyzeData.full_report;
+                resultDiv.innerText = currentReport;
+                resultContainer.style.display = 'block';
+                copyBtn.style.display = 'inline-block';
+                closePayModalWindow();
+                showToast('分析成功！', 'success');
+            } else {
+                showToast(analyzeData.message || '创建订单失败', 'error');
+                paySubmitBtn.disabled = false;
+                paySubmitBtn.innerText = '确认支付';
+            }
+        } catch(e) {
+            showToast('网络错误：' + e.message, 'error');
+            paySubmitBtn.disabled = false;
+            paySubmitBtn.innerText = '确认支付';
+        }
+    };
+    
+    closePayModal.onclick = () => {
+        closePayModalWindow();
+        paySubmitBtn.disabled = false;
+        paySubmitBtn.innerText = '确认支付';
+    };
     
     // 分析按钮
+    let currentTempId = null;
+    
     analyzeBtn.onclick = async () => {
         if (!selectedFile) return;
         
@@ -437,7 +478,6 @@ async def frontend():
         const formData = new FormData();
         formData.append('file', selectedFile);
         
-        // 构建请求头
         const headers = {};
         if (phone && apiKey) {
             headers['phone'] = phone;
@@ -454,13 +494,17 @@ async def frontend():
             completeProgress();
             
             if (!resp.ok) {
-                if (data.code === 'NEED_PAY') {
-                    // 需要支付
-                    showPayModal(data.qr_code, data.order_id, data.temp_id, data.amount);
-                    if (data.summary) {
-                        resultDiv.innerText = data.summary;
-                        resultContainer.style.display = 'block';
-                    }
+                if (resp.status === 402 && data.out_trade_no) {
+                    // 弹出支付弹窗
+                    currentTempId = data.temp_id;
+                    payModal.style.display = 'flex';
+                    payQrcodeArea.style.display = 'none';
+                    payLoading.style.display = 'none';
+                    paySubmitBtn.style.display = 'block';
+                    paySubmitBtn.disabled = false;
+                    paySubmitBtn.innerText = '确认支付';
+                    payPhone.value = phone || '';
+                    showToast('请填写手机号并确认支付', 'info');
                 } else if (data.code === 'INVALID_CREDENTIAL') {
                     showToast('手机号或API Key错误，请核对后重试', 'error');
                 } else if (data.code === 'NOT_SIMPLE_REPORT') {
@@ -495,7 +539,6 @@ async def frontend():
         const autoReport = urlParams.get('auto_report');
         const phone = urlParams.get('phone');
         const apiKey = urlParams.get('api_key');
-        const tempId = urlParams.get('temp_id');
         
         if (autoReport === 'true' && phone && apiKey) {
             phoneInput.value = decodeURIComponent(phone);
@@ -506,23 +549,63 @@ async def frontend():
     }
     checkUrlParams();
     
-    // 引导浮层 DOM 补充
-    if (!document.getElementById('tourOverlay')) {
-        const tourDiv = document.createElement('div');
-        tourDiv.id = 'tourOverlay';
-        tourDiv.className = 'tour-overlay';
-        tourDiv.innerHTML = `
-            <div id="tourCard" class="tour-card">
-                <h4 id="tourTitle">🔐 已有账号？</h4>
-                <p id="tourDesc">已付费用户请输入手机号和API Key。新用户请直接上传文件，支付后自动获取API Key。</p>
-                <div class="tour-buttons">
-                    <button id="tourNextBtn">下一步</button>
-                    <button id="tourSkipBtn">跳过</button>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(tourDiv);
+    // 首次引导
+    const hasVisited = localStorage.getItem('has_visited');
+    if (!hasVisited) {
+        setTimeout(() => { startTour(); }, 500);
+        localStorage.setItem('has_visited', 'true');
     }
+    let tourStep = 0;
+    const tourSteps = [
+        { element: '.auth-box', title: '🔐 已有账号？', desc: 'VIP用户请输入手机号和API Key。新用户请直接上传文件，支付后自动获取API Key。', position: 'top' },
+        { element: '.upload-area', title: '📄 上传报告', desc: '点击或拖拽上传PDF格式的个人简版信用报告。', position: 'bottom' },
+        { element: '#analyzeBtn', title: '🚀 开始分析', desc: '上传完成后，点击开始分析，系统将为您生成专业解读报告。', position: 'bottom' }
+    ];
+    function startTour() {
+        const overlay = document.getElementById('tourOverlay');
+        if (!overlay) {
+            const tourDiv = document.createElement('div');
+            tourDiv.id = 'tourOverlay';
+            tourDiv.className = 'tour-overlay';
+            tourDiv.innerHTML = `
+                <div id="tourCard" class="tour-card">
+                    <h4 id="tourTitle">🔐 已有账号？</h4>
+                    <p id="tourDesc">VIP用户请输入手机号和API Key。新用户请直接上传文件，支付后自动获取API Key。</p>
+                    <div class="tour-buttons">
+                        <button id="tourNextBtn">下一步</button>
+                        <button id="tourSkipBtn">跳过</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(tourDiv);
+        }
+        const overlay = document.getElementById('tourOverlay');
+        const card = document.getElementById('tourCard');
+        const titleEl = document.getElementById('tourTitle');
+        const descEl = document.getElementById('tourDesc');
+        tourStep = 0;
+        overlay.style.display = 'flex';
+        showTourStep();
+        document.getElementById('tourNextBtn').onclick = () => { tourStep++; if (tourStep >= tourSteps.length) endTour(); else showTourStep(); };
+        document.getElementById('tourSkipBtn').onclick = () => endTour();
+    }
+    function showTourStep() {
+        const step = tourSteps[tourStep];
+        const element = document.querySelector(step.element);
+        if (!element) return;
+        const rect = element.getBoundingClientRect();
+        const card = document.getElementById('tourCard');
+        document.getElementById('tourTitle').innerHTML = step.title;
+        document.getElementById('tourDesc').innerHTML = step.desc;
+        let top, left;
+        if (step.position === 'top') { top = rect.top - card.offsetHeight - 10; left = rect.left + (rect.width / 2) - (card.offsetWidth / 2); }
+        else { top = rect.bottom + 10; left = rect.left + (rect.width / 2) - (card.offsetWidth / 2); }
+        card.style.top = Math.max(10, top) + 'px';
+        card.style.left = Math.max(10, left) + 'px';
+        if (tourStep === tourSteps.length - 1) document.getElementById('tourNextBtn').innerHTML = '完成';
+        else document.getElementById('tourNextBtn').innerHTML = '下一步';
+    }
+    function endTour() { document.getElementById('tourOverlay').style.display = 'none'; }
 </script>
 </body>
 </html>

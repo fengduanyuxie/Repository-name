@@ -23,20 +23,18 @@ class A2MPaymentService:
         self.private_key = None
         if private_key_pem:
             try:
-                # 尝试直接导入
                 from Crypto.PublicKey import RSA
                 self.private_key = RSA.import_key(private_key_pem)
-                print("私钥加载成功 (PKCS#8格式)")
-            except Exception as e1:
+                print("私钥加载成功")
+            except Exception as e:
                 try:
-                    # 尝试添加 RSA 私钥头尾
                     from Crypto.PublicKey import RSA
                     if not private_key_pem.startswith('-----'):
                         pem_key = f"-----BEGIN RSA PRIVATE KEY-----\n{private_key_pem}\n-----END RSA PRIVATE KEY-----"
                         self.private_key = RSA.import_key(pem_key)
-                        print("私钥加载成功 (PKCS#1格式，已添加头尾)")
+                        print("私钥加载成功 (已添加头尾)")
                     else:
-                        raise e1
+                        raise e
                 except Exception as e2:
                     print(f"私钥加载失败: {e2}")
                     self.private_key = None
@@ -133,20 +131,172 @@ class A2MPaymentService:
         response.headers["Payment-Needed"] = payment_needed_encoded
         return response
     
-    def verify_payment_proof(self, payment_proof: str, trade_no: str, out_trade_no: str) -> Dict:
-        """验证支付凭证（简化版，实际需调用支付宝API）"""
-        # TODO: 完整实现需要调用支付宝API
-        return {
-            "success": True,
-            "active": True,
+    def verify_payment_proof(self, payment_proof: str, trade_no: str, out_trade_no: str, client_session: str = None) -> Dict:
+        """
+        验证支付凭证 - 完整实现
+        调用支付宝 alipay.aipay.agent.payment.verify 接口
+        """
+        # 构建业务参数
+        biz_content = {
+            "payment_proof": payment_proof,
             "trade_no": trade_no,
-            "out_trade_no": out_trade_no
         }
+        if client_session:
+            biz_content["client_session"] = client_session
+        
+        # 构建公共请求参数
+        params = {
+            "app_id": self.app_id,
+            "method": "alipay.aipay.agent.payment.verify",
+            "format": "JSON",
+            "charset": "UTF-8",
+            "sign_type": "RSA2",
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "version": "1.0",
+            "biz_content": json.dumps(biz_content, separators=(',', ':'))
+        }
+        
+        # 生成签名
+        sorted_keys = sorted(params.keys())
+        sign_str = "&".join([f"{k}={params[k]}" for k in sorted_keys if params[k]])
+        
+        try:
+            params["sign"] = self._rsa2_sign(sign_str)
+        except Exception as e:
+            return {
+                "success": False,
+                "active": False,
+                "error": f"签名失败: {e}"
+            }
+        
+        # 发送请求
+        try:
+            print(f"验证支付凭证: out_trade_no={out_trade_no}, trade_no={trade_no}")
+            response = requests.post(self.gateway_url, data=params, timeout=30)
+            result = response.json()
+            print(f"验证响应: {result}")
+            
+            # 解析响应
+            if "alipay_aipay_agent_payment_verify_response" in result:
+                resp_data = result["alipay_aipay_agent_payment_verify_response"]
+                if resp_data.get("code") == "10000":
+                    return {
+                        "success": True,
+                        "active": resp_data.get("active", False),
+                        "trade_no": resp_data.get("trade_no"),
+                        "out_trade_no": resp_data.get("out_trade_no"),
+                        "resource_id": resp_data.get("resource_id"),
+                        "amount": resp_data.get("amount"),
+                        "error": None
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "active": False,
+                        "error": resp_data.get("sub_msg", "验证失败"),
+                        "sub_code": resp_data.get("sub_code")
+                    }
+            else:
+                return {
+                    "success": False,
+                    "active": False,
+                    "error": "响应格式错误"
+                }
+                
+        except Exception as e:
+            print(f"验证支付凭证异常: {e}")
+            return {
+                "success": False,
+                "active": False,
+                "error": str(e)
+            }
     
     def send_fulfillment_confirm(self, trade_no: str) -> bool:
-        """发送履约确认（简化版）"""
-        print(f"履约确认: trade_no={trade_no}")
-        return True
+        """
+        发送履约确认 - 完整实现
+        调用支付宝 alipay.aipay.agent.fulfillment.confirm 接口
+        """
+        biz_content = {"trade_no": trade_no}
+        
+        params = {
+            "app_id": self.app_id,
+            "method": "alipay.aipay.agent.fulfillment.confirm",
+            "format": "JSON",
+            "charset": "UTF-8",
+            "sign_type": "RSA2",
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "version": "1.0",
+            "biz_content": json.dumps(biz_content, separators=(',', ':'))
+        }
+        
+        sorted_keys = sorted(params.keys())
+        sign_str = "&".join([f"{k}={params[k]}" for k in sorted_keys if params[k]])
+        
+        try:
+            params["sign"] = self._rsa2_sign(sign_str)
+        except Exception as e:
+            print(f"履约确认签名失败: {e}")
+            return False
+        
+        try:
+            print(f"发送履约确认: trade_no={trade_no}")
+            response = requests.post(self.gateway_url, data=params, timeout=30)
+            result = response.json()
+            
+            if "alipay_aipay_agent_fulfillment_confirm_response" in result:
+                resp_data = result["alipay_aipay_agent_fulfillment_confirm_response"]
+                if resp_data.get("code") == "10000":
+                    print(f"履约确认成功: trade_no={trade_no}")
+                    return True
+                else:
+                    print(f"履约确认失败: {resp_data.get('sub_msg')}")
+                    return False
+            else:
+                print(f"履约确认响应格式错误")
+                return False
+        except Exception as e:
+            print(f"履约确认异常: {e}")
+            return False
+    
+    def query_order_status(self, out_trade_no: str) -> Dict:
+        """查询订单支付状态"""
+        biz_content = {"out_trade_no": out_trade_no}
+        
+        params = {
+            "app_id": self.app_id,
+            "method": "alipay.trade.query",
+            "format": "JSON",
+            "charset": "UTF-8",
+            "sign_type": "RSA2",
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "version": "1.0",
+            "biz_content": json.dumps(biz_content, separators=(',', ':'))
+        }
+        
+        sorted_keys = sorted(params.keys())
+        sign_str = "&".join([f"{k}={params[k]}" for k in sorted_keys if params[k]])
+        
+        try:
+            params["sign"] = self._rsa2_sign(sign_str)
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+        
+        try:
+            response = requests.post(self.gateway_url, data=params, timeout=30)
+            result = response.json()
+            
+            if "alipay_trade_query_response" in result:
+                resp_data = result["alipay_trade_query_response"]
+                if resp_data.get("code") == "10000":
+                    trade_status = resp_data.get("trade_status")
+                    return {
+                        "status": "paid" if trade_status == "TRADE_SUCCESS" else "pending",
+                        "trade_no": resp_data.get("trade_no"),
+                        "out_trade_no": resp_data.get("out_trade_no")
+                    }
+            return {"status": "error"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
 
 
 def get_a2m_service():

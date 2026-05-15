@@ -4,7 +4,7 @@
 import re
 import uuid
 from fastapi import APIRouter, File, UploadFile, HTTPException, Header, Request
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse
 from datetime import datetime
 import database
 import credit_analysis
@@ -13,7 +13,7 @@ from a2m_payment import get_a2m_service
 
 router = APIRouter(tags=["api"])
 
-# 初始化A2M支付服务（从环境变量读取配置）
+# 初始化A2M支付服务
 a2m_service = get_a2m_service()
 
 
@@ -42,11 +42,29 @@ def clean_deepseek_response(text: str) -> str:
 
 
 def format_report_sections(text: str) -> str:
-    """格式化报告段落，添加空行和图标"""
-    text = re.sub(r'(\d+[\.\)、]|\u2460|\u2461|\u2462|\u2463|\u2464|\u2465)', r'\n\n\1', text)
+    """
+    格式化报告段落，添加空行和图标
+    修正数字序号后多余换行的问题
+    """
+    # 修复：移除数字序号前面的多余换行
+    # 将 \n\n1️⃣ 改为 \n1️⃣
+    text = re.sub(r'\n{2,}(\d+[\.\)、]|\u2460|\u2461|\u2462|\u2463|\u2464|\u2465)', r'\n\1', text)
+    
+    # 添加关键提示图标
     text = re.sub(r'(建议[：:])', r'💡 \1', text)
     text = re.sub(r'(风险[：:])', r'⚠️ \1', text)
-    return text
+    
+    # 为小节标题添加 📌 图标（如果没有的话）
+    lines = text.split('\n')
+    formatted_lines = []
+    for line in lines:
+        # 匹配数字序号开头的小节标题
+        if re.match(r'^\d+[\.\)、]', line) or re.match(r'^[\u2460-\u2465]', line):
+            if not line.startswith('📌'):
+                line = '📌 ' + line
+        formatted_lines.append(line)
+    
+    return '\n'.join(formatted_lines)
 
 
 # ========== 用户端API ==========
@@ -56,7 +74,7 @@ async def analyze(
     file: UploadFile, 
     phone: str = Header(None), 
     api_key: str = Header(None),
-    payment_proof: str = Header(None)  # A2M支付凭证（二次请求时携带）
+    payment_proof: str = Header(None)
 ):
     """分析接口 - 支持A2M智能收支付"""
     # 频率限制
@@ -121,8 +139,7 @@ async def analyze(
         
         # 情况1：用户已提供 Payment-Proof（支付后二次请求）
         if payment_proof:
-            # 从请求中解析支付凭证信息
-            # 实际需要通过支付宝API验证，这里简化
+            # 从请求中解析支付凭证信息，实际需要完整验证
             return await handle_paid_request(phone, api_key, report_content, payment_proof)
         
         # 情况2：老用户有API Key且余额充足
@@ -136,7 +153,7 @@ async def analyze(
                 )
             
             if balance > 0:
-                # 有效用户，扣费并返回完整报告
+                # 有效用户，扣费并返回完整报告（去掉API Key的引号）
                 database.consume_balance(phone, api_key)
                 user_data = database.get_user_by_phone(phone)
                 expire_date = user_data.get('expire_at', '永久')
@@ -145,36 +162,33 @@ async def analyze(
                 
                 final_report = f"""让您久等了，您的专属征信解读报告已生成，请查阅~
 
-🔑 **您的API Key**: `{api_key}`
+🔑 **您的API Key**: {api_key}
 💰 **剩余次数**: {user_data.get('balance', 0)}
 📅 **有效期至**: {expire_date}
 > ⚠️ **请务必保存好您的API Key！**
 
 {report_content}
 
-💡 如需多次分析，请联系管理员定制套餐（微信:DXNBZ579）"""
+💡 定价：19.9元/次 | 定制VIP套餐请联系
+📱 管理员微信:DXNBZ579"""
                 
                 return JSONResponse({"success": True, "full_report": final_report})
         
         # 情况3：需要支付（新用户 或 老用户次数用完）
-        # 保存临时报告
         temp_id = f"TEMP_{uuid.uuid4().hex[:16]}"
         database.save_temp_report(temp_id, report_content, phone, api_key)
         
-        # 生成商户订单号
         out_trade_no = f"ORDER_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
         
-        # 创建订单记录
         database.create_order(
             order_id=str(uuid.uuid4()),
             out_trade_no=out_trade_no,
             phone=phone or "new_user",
-            amount="1990",  # 19.90元 = 1990分
+            amount="1990",
             resource_id=f"/api/claim_report?temp_id={temp_id}",
             temp_id=temp_id
         )
         
-        # 返回402 Payment-Needed响应
         if a2m_service:
             return a2m_service.create_payment_needed_response(
                 out_trade_no=out_trade_no,
@@ -183,15 +197,15 @@ async def analyze(
                 goods_name="征信报告分析服务"
             )
         else:
-            # A2M服务未配置，返回提示
             return JSONResponse(
                 status_code=402,
                 content={
                     "code": "Payment-Needed",
-                    "message": "支付功能配置中，请稍后再试",
+                    "message": "需要支付",
                     "out_trade_no": out_trade_no,
                     "amount": "19.90",
-                    "currency": "CNY"
+                    "currency": "CNY",
+                    "goods_name": "征信报告分析服务"
                 }
             )
             
@@ -206,15 +220,56 @@ async def analyze(
 
 
 async def handle_paid_request(phone: str, api_key: str, report_content: str, payment_proof: str):
-    """处理已支付用户的请求"""
-    # TODO: 解析 Payment-Proof，获取 trade_no 和 out_trade_no
-    # 然后调用支付宝API验证凭证
+    """处理已支付用户的请求（完整验证）"""
+    # 解析 Payment-Proof
+    try:
+        import base64
+        decoded = base64.urlsafe_b64decode(payment_proof + '==').decode('utf-8')
+        import json
+        proof_data = json.loads(decoded)
+        
+        protocol = proof_data.get("protocol", {})
+        payment_proof_value = protocol.get("payment_proof")
+        trade_no = protocol.get("trade_no")
+        out_trade_no = protocol.get("out_trade_no")
+    except Exception as e:
+        return JSONResponse(
+            status_code=400,
+            content={"code": "INVALID_PAYMENT_PROOF", "message": f"支付凭证解析失败: {str(e)}"}
+        )
     
-    # 简化实现：假设用户已支付，创建/充值账号
+    if not payment_proof_value or not trade_no:
+        return JSONResponse(
+            status_code=400,
+            content={"code": "INVALID_PAYMENT_PROOF", "message": "支付凭证缺少必要字段"}
+        )
+    
+    # 调用支付宝API验证凭证
+    if a2m_service:
+        verify_result = a2m_service.verify_payment_proof(
+            payment_proof=payment_proof_value,
+            trade_no=trade_no,
+            out_trade_no=out_trade_no or ""
+        )
+        
+        if not verify_result.get("success") or not verify_result.get("active"):
+            return JSONResponse(
+                status_code=400,
+                content={"code": "INVALID_PAYMENT_PROOF", "message": f"支付凭证无效: {verify_result.get('error')}"}
+            )
+        
+        # 更新订单状态
+        if out_trade_no:
+            database.update_order_paid(out_trade_no, trade_no)
+            database.update_order_fulfilled(out_trade_no)
+            
+            # 发送履约确认
+            a2m_service.send_fulfillment_confirm(trade_no)
+    
+    # 为用户创建账号并充值
     if not phone:
         phone = f"user_{uuid.uuid4().hex[:8]}"
     
-    # 为用户创建账号并充值1次
     new_api_key, new_balance = database.add_or_recharge_user(phone, 1, 62)
     
     user_data = database.get_user_by_phone(phone)
@@ -222,16 +277,18 @@ async def handle_paid_request(phone: str, api_key: str, report_content: str, pay
     if isinstance(expire_date, datetime):
         expire_date = expire_date.strftime('%Y-%m-%d')
     
+    # 去掉API Key的引号
     final_report = f"""让您久等了，您的专属征信解读报告已生成，请查阅~
 
-🔑 **您的API Key**: `{new_api_key}`
+🔑 **您的API Key**: {new_api_key}
 💰 **剩余次数**: {new_balance}
 📅 **有效期至**: {expire_date}
 > ⚠️ **请务必保存好您的API Key！**
 
 {report_content}
 
-💡 如需多次分析，请联系管理员定制套餐（微信:DXNBZ579）"""
+💡 定价：19.9元/次 | 定制VIP套餐请联系
+📱 管理员微信:DXNBZ579"""
     
     return JSONResponse({
         "success": True, 
@@ -243,13 +300,12 @@ async def handle_paid_request(phone: str, api_key: str, report_content: str, pay
 
 @router.post("/api/claim_report")
 async def claim_report(request: Request):
-    """支付完成后获取报告（A2M回调）"""
+    """支付完成后获取报告"""
     body = await request.json()
     phone = body.get("phone")
     temp_id = body.get("temp_id")
     out_trade_no = body.get("out_trade_no")
     trade_no = body.get("trade_no")
-    payment_proof = body.get("payment_proof")
     
     if not phone or not temp_id:
         return JSONResponse(
@@ -257,10 +313,6 @@ async def claim_report(request: Request):
             content={"code": "MISSING_PARAMS", "message": "参数错误"}
         )
     
-    # 验证订单状态
-    order = database.get_order_by_out_trade_no(out_trade_no) if out_trade_no else None
-    
-    # 获取临时报告
     temp_data = database.get_temp_report(temp_id)
     if not temp_data:
         return JSONResponse(
@@ -268,31 +320,69 @@ async def claim_report(request: Request):
             content={"code": "REPORT_EXPIRED", "message": "报告已过期，请重新上传"}
         )
     
-    # 为用户创建账号并充值1次
-    api_key, new_balance = database.add_or_recharge_user(phone, 1, 62)
+    # 检查是否已履约（防重放）
+    if out_trade_no and database.is_order_already_fulfilled(out_trade_no):
+        return JSONResponse(
+            status_code=400,
+            content={"code": "ALREADY_FULFILLED", "message": "订单已履约"}
+        )
     
-    # 更新订单状态
+    # 为用户创建账号并充值
+    new_api_key, new_balance = database.add_or_recharge_user(phone, 1, 62)
+    
     if out_trade_no:
         database.update_order_paid(out_trade_no, trade_no)
         database.update_order_fulfilled(out_trade_no)
+        
+        if a2m_service and trade_no:
+            a2m_service.send_fulfillment_confirm(trade_no)
     
-    # 删除临时报告
     database.delete_temp_report(temp_id)
-    
     report_content = temp_data.get("report", "")
     
+    # 去掉API Key的引号
     final_report = f"""让您久等了，您的专属征信解读报告已生成，请查阅~
 
-🔑 **您的API Key**: `{api_key}`
+🔑 **您的API Key**: {new_api_key}
 💰 **剩余次数**: {new_balance}
 📅 **有效期至**: 62天内有效
 > ⚠️ **请务必保存好您的API Key！**
 
 {report_content}
 
-💡 如需多次分析，请联系管理员定制套餐（微信:DXNBZ579）"""
+💡 定价：19.9元/次 | 定制VIP套餐请联系
+📱 管理员微信:DXNBZ579"""
     
-    return JSONResponse({"success": True, "full_report": final_report, "api_key": api_key})
+    return JSONResponse({"success": True, "full_report": final_report, "api_key": new_api_key})
+
+
+@router.get("/api/order_status/{out_trade_no}")
+async def order_status(out_trade_no: str):
+    """查询订单支付状态（前端轮询用）"""
+    # 先从数据库查询
+    order = database.get_order_by_out_trade_no(out_trade_no)
+    if not order:
+        return JSONResponse({"status": "not_found", "message": "订单不存在"})
+    
+    if order.get("status") == "paid" or order.get("status") == "fulfilled":
+        return JSONResponse({
+            "status": "paid",
+            "out_trade_no": out_trade_no,
+            "trade_no": order.get("trade_no")
+        })
+    
+    # 如果数据库中是pending，调用支付宝查询
+    if a2m_service:
+        result = a2m_service.query_order_status(out_trade_no)
+        if result.get("status") == "paid":
+            database.update_order_paid(out_trade_no, result.get("trade_no"))
+            return JSONResponse({
+                "status": "paid",
+                "out_trade_no": out_trade_no,
+                "trade_no": result.get("trade_no")
+            })
+    
+    return JSONResponse({"status": "pending"})
 
 
 @router.get("/api/verify")
