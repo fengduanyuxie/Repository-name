@@ -1,5 +1,5 @@
 # main.py
-# 征信报告分析系统 - 主入口（最终版）
+# 征信报告分析系统 - 主入口（精简版）
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -62,7 +62,7 @@ async def frontend():
         .font-controls button:hover{background:#ccc}
         .result{background:#f9f9f9;border-radius:16px;padding:16px;font-family:monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;max-height:500px;overflow:auto;border:1px solid #e0e0e0}
         .info-note{background:#e8f4fd;padding:12px;border-radius:12px;margin-top:20px;font-size:12px;text-align:center}
-        .info-note a{color:#4a90e2;text-decoration:underline}
+        .info-note a{color:#4a90e2;text-decoration:underline;cursor:pointer}
         .copy-success{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#28a745;color:#fff;padding:10px 20px;border-radius:40px;font-size:14px;z-index:1000;display:none}
         .toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:12px 24px;border-radius:40px;font-size:14px;z-index:2000;display:none;white-space:nowrap}
         .toast.success{background:#28a745}
@@ -74,10 +74,10 @@ async def frontend():
         .tour-card p{margin-bottom:12px;font-size:14px;color:#666}
         .tour-buttons{display:flex;gap:8px;justify-content:flex-end}
         .tour-buttons button{padding:6px 16px;font-size:12px;width:auto}
-        .qrcode-modal{display:none;position:fixed;z-index:4000;left:0;top:0;width:100%;height:100%;background:rgba(0,0,0,0.5);justify-content:center;align-items:center}
-        .qrcode-content{background:#fff;border-radius:16px;padding:24px;text-align:center;max-width:280px;width:90%}
-        .qrcode-content img{width:100%;max-width:200px;border-radius:12px}
-        .qrcode-content p{margin-top:12px;color:#666}
+        .wechat-copy{display:inline-flex;align-items:center;gap:8px;background:#e8f4fd;padding:8px 16px;border-radius:40px;margin:8px 0}
+        .wechat-id{font-size:16px;font-weight:bold;color:#1e3c72;letter-spacing:1px}
+        .copy-wechat-btn{background:#28a745;color:#fff;border:none;padding:4px 12px;border-radius:20px;font-size:12px;cursor:pointer}
+        .copy-wechat-btn:hover{background:#218838}
     </style>
 </head>
 <body>
@@ -85,8 +85,8 @@ async def frontend():
     <h1>📄 征信结构解读</h1>
     
     <div class="auth-box">
-        <input type="tel" id="phone" placeholder="手机号（VIP用户必填）" autocomplete="off">
-        <input type="text" id="apiKey" placeholder="API Key（VIP用户必填）" autocomplete="off">
+        <input type="tel" id="phone" placeholder="手机号（必填）" autocomplete="off">
+        <input type="text" id="apiKey" placeholder="API Key（必填）" autocomplete="off">
         <div class="remember-row">
             <label>
                 <input type="checkbox" id="rememberMe"> 记住我
@@ -124,22 +124,15 @@ async def frontend():
     
     <div class="info-note">
         💡 19.9元/次 | 定制VIP套餐请联系管理员<br>
-        <a href="javascript:void(0)" id="showWechatQrcode">📱 微信:DXNBZ579</a>
+        <div class="wechat-copy">
+            <span class="wechat-id">📱 微信号：DXNBZ579</span>
+            <button class="copy-wechat-btn" id="copyWechatBtn">复制</button>
+        </div>
     </div>
 </div>
 
 <div id="copySuccess" class="copy-success">✅ 已复制到剪贴板</div>
 <div id="toast" class="toast"></div>
-
-<!-- 二维码弹窗 -->
-<div id="qrcodeModal" class="qrcode-modal">
-    <div class="qrcode-content">
-        <img src="/static/wechat_qrcode.png" alt="管理员微信二维码" style="width:100%;max-width:200px;border-radius:12px" onerror="this.onerror=null; this.alt='请刷新页面重试';">
-        <p>微信扫码添加管理员</p>
-        <p style="font-size:12px;color:#999">微信号：DXNBZ579</p>
-        <button onclick="closeQrcodeModal()" style="margin-top:16px;padding:8px 20px;background:#4a90e2;color:#fff;border:none;border-radius:20px;cursor:pointer">关闭</button>
-    </div>
-</div>
 
 <script>
     // DOM 元素
@@ -158,27 +151,21 @@ async def frontend():
     const progressContainer = document.getElementById('progressContainer');
     const progressFill = document.getElementById('progressFill');
     const progressText = document.getElementById('progressText');
+    const copyWechatBtn = document.getElementById('copyWechatBtn');
     
     let selectedFile = null;
     let currentReport = '';
     
-    // 二维码弹窗控制
-    const qrcodeModal = document.getElementById('qrcodeModal');
-    const showWechatBtn = document.getElementById('showWechatQrcode');
-    if (showWechatBtn) {
-        showWechatBtn.onclick = function(e) {
-            e.preventDefault();
-            if (qrcodeModal) {
-                qrcodeModal.style.display = 'flex';
-            }
+    // 复制微信号
+    if (copyWechatBtn) {
+        copyWechatBtn.onclick = function() {
+            navigator.clipboard.writeText('DXNBZ579').then(function() {
+                showToast('微信号已复制，请打开微信添加', 'success');
+            }).catch(function() {
+                showToast('复制失败，请手动添加', 'error');
+            });
         };
     }
-    window.closeQrcodeModal = function() {
-        if (qrcodeModal) qrcodeModal.style.display = 'none';
-    };
-    window.addEventListener('click', function(e) {
-        if (e.target === qrcodeModal) closeQrcodeModal();
-    });
     
     // 字体大小控制
     const fontSizes = {small: '12px', medium: '14px', large: '16px'};
@@ -257,7 +244,9 @@ async def frontend():
     };
     
     // 文件上传
-    function checkAuth() { analyzeBtn.disabled = !selectedFile; }
+    function checkAuth() { 
+        analyzeBtn.disabled = !(selectedFile && phoneInput.value.trim() && apiKeyInput.value.trim()); 
+    }
     phoneInput.oninput = checkAuth;
     apiKeyInput.oninput = checkAuth;
     
@@ -268,7 +257,7 @@ async def frontend():
             return;
         }
         selectedFile = file;
-        analyzeBtn.disabled = false;
+        checkAuth();
         document.querySelector('.upload-icon').innerHTML = '✅';
         document.querySelector('.upload-text').innerHTML = '文件已就绪';
         fileNameSpan.innerHTML = file.name;
@@ -309,9 +298,12 @@ async def frontend():
         const phone = phoneInput.value.trim();
         const apiKey = apiKeyInput.value.trim();
         
-        if (phone && apiKey) {
-            saveCredentials();
+        if (!phone || !apiKey) {
+            showToast('请填写手机号和API Key', 'error');
+            return;
         }
+        
+        saveCredentials();
         
         analyzeBtn.disabled = true;
         loadingDiv.style.display = 'block';
@@ -322,11 +314,10 @@ async def frontend():
         const formData = new FormData();
         formData.append('file', selectedFile);
         
-        const headers = {};
-        if (phone && apiKey) {
-            headers['phone'] = phone;
-            headers['api-key'] = apiKey;
-        }
+        const headers = {
+            'phone': phone,
+            'api-key': apiKey
+        };
         
         try {
             const resp = await fetch('/api/analyze', {
@@ -341,7 +332,9 @@ async def frontend():
                 if (data.code === 'INSUFFICIENT_BALANCE') {
                     showToast('次数已用完，请联系管理员充值（微信:DXNBZ579）', 'error');
                 } else if (data.code === 'INVALID_CREDENTIAL') {
-                    showToast('手机号或API Key错误，请核对后重试', 'error');
+                    showToast('手机号或API Key错误，请核对后重试。新用户请联系管理员获取API Key', 'error');
+                } else if (data.code === 'MISSING_CREDENTIAL') {
+                    showToast('请填写手机号和API Key。新用户请联系管理员获取API Key', 'error');
                 } else if (data.code === 'NOT_SIMPLE_REPORT') {
                     showToast('请上传正确的简版征信报告', 'error');
                 } else if (data.code === 'DETAILED_REPORT') {
@@ -357,11 +350,6 @@ async def frontend():
             resultContainer.style.display = 'block';
             copyBtn.style.display = 'inline-block';
             resultContainer.scrollIntoView({ behavior: 'smooth' });
-            
-            // 如果是新用户获得了临时API Key，提示保存
-            if (data.temp_api_key) {
-                showToast('请保存您的临时API Key，后续使用需充值', 'info');
-            }
             
         } catch (err) {
             completeProgress();
@@ -382,7 +370,7 @@ async def frontend():
     
     let tourStep = 0;
     const tourSteps = [
-        { element: '.auth-box', title: '🔐 已有账号？', desc: 'VIP用户请输入手机号和API Key。新用户请直接上传文件，免费试用一次。', position: 'top' },
+        { element: '.auth-box', title: '🔐 已有账号？', desc: '请输入您的手机号和API Key。新用户请联系管理员获取API Key。', position: 'top' },
         { element: '.upload-area', title: '📄 上传报告', desc: '点击或拖拽上传PDF格式的个人简版信用报告。', position: 'bottom' },
         { element: '#analyzeBtn', title: '🚀 开始分析', desc: '上传完成后，点击开始分析，系统将为您生成专业解读报告。', position: 'bottom' }
     ];
@@ -393,11 +381,10 @@ async def frontend():
             overlay = document.createElement('div');
             overlay.id = 'tourOverlay';
             overlay.className = 'tour-overlay';
-            overlay.innerHTML = '<div id="tourCard" class="tour-card"><h4 id="tourTitle">🔐 已有账号？</h4><p id="tourDesc">VIP用户请输入手机号和API Key。新用户请直接上传文件，免费试用一次。</p><div class="tour-buttons"><button id="tourNextBtn">下一步</button><button id="tourSkipBtn">跳过</button></div></div>';
+            overlay.innerHTML = '<div id="tourCard" class="tour-card"><h4 id="tourTitle">🔐 已有账号？</h4><p id="tourDesc">请输入您的手机号和API Key。新用户请联系管理员获取API Key。</p><div class="tour-buttons"><button id="tourNextBtn">下一步</button><button id="tourSkipBtn">跳过</button></div></div>';
             document.body.appendChild(overlay);
         }
         overlay = document.getElementById('tourOverlay');
-        const card = document.getElementById('tourCard');
         tourStep = 0;
         overlay.style.display = 'flex';
         showTourStep();

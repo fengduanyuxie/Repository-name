@@ -1,5 +1,5 @@
 # database.py
-# MongoDB 数据库操作（含日志、统计、有效期、临时存储）
+# MongoDB 数据库操作（精简版：无支付、无临时存储）
 
 from datetime import datetime, timedelta
 from typing import Dict, Any, Tuple, List, Optional
@@ -11,11 +11,10 @@ db = None
 users_collection = None
 logs_collection = None
 stats_collection = None
-temp_reports_collection = None
 
 def init_db():
     """初始化数据库连接"""
-    global mongo_client, db, users_collection, logs_collection, stats_collection, temp_reports_collection
+    global mongo_client, db, users_collection, logs_collection, stats_collection
     if not config.MONGO_URI:
         print("警告: MONGO_URI 未设置")
         return False
@@ -26,14 +25,12 @@ def init_db():
         users_collection = db["users"]
         logs_collection = db["admin_logs"]
         stats_collection = db["usage_stats"]
-        temp_reports_collection = db["temp_reports"]
         
         users_collection.create_index("phone", unique=True)
         users_collection.create_index("api_key", unique=True)
         users_collection.create_index("expire_at")
         logs_collection.create_index("created_at")
         stats_collection.create_index("date", unique=True)
-        temp_reports_collection.create_index("expires_at", expireAfterSeconds=0)
         
         print("MongoDB 连接成功")
         return True
@@ -60,7 +57,7 @@ def verify_user(phone: str, api_key: str) -> tuple:
     return False, 0
 
 def verify_user_exists(phone: str, api_key: str) -> tuple:
-    """验证用户是否存在（不计次数），返回 (是否存在, 用户信息, 剩余次数)"""
+    """验证用户是否存在，返回 (是否存在, 用户信息, 剩余次数)"""
     if users_collection is None:
         return False, None, 0
     user = users_collection.find_one({
@@ -177,30 +174,3 @@ def get_usage_stats(days: int = 30):
         {"date": {"$gte": start_date}},
         {"_id": 0}
     ).sort("date", 1))
-
-# ========== 临时存储（MongoDB TTL）==========
-def save_temp_report(temp_id: str, report_content: str, phone: str = None, api_key: str = None):
-    """保存临时报告，24小时后自动过期"""
-    if temp_reports_collection is None:
-        return False
-    temp_reports_collection.insert_one({
-        "temp_id": temp_id,
-        "report": report_content,
-        "phone": phone,
-        "api_key": api_key,
-        "created_at": datetime.now(),
-        "expires_at": datetime.now() + timedelta(hours=24)
-    })
-    return True
-
-def get_temp_report(temp_id: str):
-    """获取临时报告"""
-    if temp_reports_collection is None:
-        return None
-    return temp_reports_collection.find_one({"temp_id": temp_id}, {"_id": 0})
-
-def delete_temp_report(temp_id: str):
-    """删除临时报告"""
-    if temp_reports_collection is None:
-        return
-    temp_reports_collection.delete_one({"temp_id": temp_id})

@@ -1,5 +1,5 @@
 # api_routes.py
-# API 路由（含频率限制、报告清理、简版甄别、保存原始数据）
+# API 路由（精简版：无支付功能）
 
 import re
 import uuid
@@ -38,24 +38,48 @@ def clean_deepseek_response(text: str) -> str:
 
 
 def format_report_sections(text: str) -> str:
-    """格式化报告段落，添加空行和图标"""
-    # 修复：移除数字序号前面的多余换行
-    text = re.sub(r'\n{2,}(\d+[\.\)、]|\u2460|\u2461|\u2462|\u2463|\u2464|\u2465)', r'\n\1', text)
+    """
+    格式化报告段落
+    1. 将数字序号 1. 2. 等转换为 1️⃣ 2️⃣ 等
+    2. 移除 📌 图标
+    3. 将 "风控💡 建议" 改为 "风控建议"
+    4. 为每个小节标题下的正文段落添加首行缩进2个中文字符（4个空格）
+    """
+    import re
     
-    # 添加关键提示图标
-    text = re.sub(r'(建议[：:])', r'💡 \1', text)
-    text = re.sub(r'(风险[：:])', r'⚠️ \1', text)
+    def replace_number(match):
+        num = match.group(1)
+        emoji_map = {
+            '1': '1️⃣', '2': '2️⃣', '3': '3️⃣',
+            '4': '4️⃣', '5': '5️⃣', '6': '6️⃣',
+            '7': '7️⃣', '8': '8️⃣', '9': '9️⃣'
+        }
+        return emoji_map.get(num, num + '️⃣')
     
-    # 为小节标题添加 📌 图标
+    text = re.sub(r'(\d+)[\.\)、]', replace_number, text)
+    text = text.replace('📌', '')
+    text = text.replace('风控💡 建议', '风控建议')
+    
     lines = text.split('\n')
     formatted_lines = []
-    for line in lines:
-        if re.match(r'^\d+[\.\)、]', line) or re.match(r'^[\u2460-\u2465]', line):
-            if not line.startswith('📌'):
-                line = '📌 ' + line
-        formatted_lines.append(line)
     
-    return '\n'.join(formatted_lines)
+    for line in lines:
+        is_title = bool(re.match(r'^[1-9]️⃣', line.strip()))
+        if not line.strip():
+            formatted_lines.append(line)
+            continue
+        if is_title:
+            formatted_lines.append(line)
+        else:
+            if not line.startswith('    '):
+                formatted_lines.append('    ' + line)
+            else:
+                formatted_lines.append(line)
+    
+    result = '\n'.join(formatted_lines)
+    result = re.sub(r'\n{3,}', '\n\n', result)
+    
+    return result
 
 
 # ========== 用户端API ==========
@@ -66,7 +90,8 @@ async def analyze(
     phone: str = Header(None), 
     api_key: str = Header(None)
 ):
-    """分析接口 - 支持新用户免费试用，老用户API Key验证"""
+    """分析接口 - 必须提供手机号和API Key"""
+    
     # 频率限制
     if phone and not auth.rate_limit(phone, limit=10, window=60):
         remaining = auth.get_rate_limit_remaining(phone, limit=10, window=60)
@@ -79,6 +104,13 @@ async def analyze(
         return JSONResponse(
             status_code=500,
             content={"code": "DB_ERROR", "message": "数据库未连接，请稍后重试"}
+        )
+    
+    # 验证手机号和API Key是否提供
+    if not phone or not api_key:
+        return JSONResponse(
+            status_code=401,
+            content={"code": "MISSING_CREDENTIAL", "message": "请填写手机号和API Key。新用户请联系管理员（微信:DXNBZ579）获取API Key"}
         )
     
     # 验证文件
@@ -105,6 +137,21 @@ async def analyze(
                 content={"code": "DETAILED_REPORT", "message": "此为详版报告，请上传简版"}
             )
         
+        # 验证用户
+        exists, user, balance = database.verify_user_exists(phone, api_key)
+        
+        if not exists:
+            return JSONResponse(
+                status_code=401,
+                content={"code": "INVALID_CREDENTIAL", "message": "手机号或API Key错误，请核对后重试。新用户请联系管理员（微信:DXNBZ579）获取API Key"}
+            )
+        
+        if balance == 0:
+            return JSONResponse(
+                status_code=402,
+                content={"code": "INSUFFICIENT_BALANCE", "message": "次数已用完，请联系管理员充值（微信:DXNBZ579）"}
+            )
+        
         # 生成分析报告
         stats, lines = credit_analysis.generate_report(md)
         raw_response = credit_analysis.call_deepseek(credit_analysis.build_llm_prompt(stats))
@@ -118,42 +165,21 @@ async def analyze(
             if database.db is not None:
                 raw_collection = database.db["raw_reports"]
                 raw_collection.insert_one({
-                    "phone": phone or "anonymous",
+                    "phone": phone,
                     "raw_text": md,
                     "created_at": datetime.now()
                 })
         except Exception as e:
             print(f"保存原始数据失败: {e}")
         
-        # ========== 用户状态判断 ==========
-        if phone and api_key:
-            # 老用户：验证API Key
-            exists, user, balance = database.verify_user_exists(phone, api_key)
-            
-            if not exists:
-                return JSONResponse(
-                    status_code=401,
-                    content={"code": "INVALID_CREDENTIAL", "message": "手机号或 API Key 错误，请核对后重试，或联系管理员"}
-                )
-            
-            if balance == 0:
-                # 次数用完
-                return JSONResponse(
-                    status_code=402,
-                    content={
-                        "code": "INSUFFICIENT_BALANCE",
-                        "message": "次数已用完，请联系管理员充值（微信:DXNBZ579）"
-                    }
-                )
-            
-            # 有效用户，扣费并返回完整报告
-            database.consume_balance(phone, api_key)
-            user_data = database.get_user_by_phone(phone)
-            expire_date = user_data.get('expire_at', '永久')
-            if isinstance(expire_date, datetime):
-                expire_date = expire_date.strftime('%Y-%m-%d')
-            
-            final_report = f"""让您久等了，您的专属征信解读报告已生成，请查阅~
+        # 扣减次数
+        database.consume_balance(phone, api_key)
+        user_data = database.get_user_by_phone(phone)
+        expire_date = user_data.get('expire_at', '永久')
+        if isinstance(expire_date, datetime):
+            expire_date = expire_date.strftime('%Y-%m-%d')
+        
+        final_report = f"""让您久等了，您的专属征信解读报告已生成，请查阅~
 
 🔑 **您的API Key**: {api_key}
 💰 **剩余次数**: {user_data.get('balance', 0)}
@@ -164,26 +190,9 @@ async def analyze(
 
 💡 19.9元/次 | 定制VIP套餐请联系管理员
 📱 微信:DXNBZ579"""
-            
-            return JSONResponse({"success": True, "full_report": final_report})
         
-        else:
-            # 新用户：无API Key，返回免费试用一次的报告
-            temp_api_key = f"temp_{uuid.uuid4().hex[:16]}"
-            final_report = f"""让您久等了，您的专属征信解读报告已生成，请查阅~
-
-🔑 **临时API Key**: {temp_api_key}
-💰 **剩余次数**: 0（此为免费试用报告）
-📅 **有效期至**: 今日
-> ⚠️ **请保存此API Key，后续需充值后方可继续使用**
-
-{report_content}
-
-💡 19.9元/次 | 定制VIP套餐请联系管理员
-📱 微信:DXNBZ579"""
-            
-            return JSONResponse({"success": True, "full_report": final_report, "temp_api_key": temp_api_key})
-            
+        return JSONResponse({"success": True, "full_report": final_report})
+        
     except HTTPException:
         raise
     except Exception as e:
@@ -196,17 +205,19 @@ async def analyze(
 
 @router.get("/api/verify")
 async def verify(phone: str, api_key: str):
+    """验证用户凭证"""
     valid, balance = database.verify_user(phone, api_key)
     return {"valid": valid, "remaining": balance if valid else 0}
 
 
 @router.get("/api/balance")
 async def get_balance(phone: str, api_key: str):
+    """查询剩余次数"""
     valid, balance = database.verify_user(phone, api_key)
     if not valid:
         return JSONResponse(
             status_code=401,
-            content={"code": "INVALID_CREDENTIAL", "message": "无效的 API Key"}
+            content={"code": "INVALID_CREDENTIAL", "message": "无效的API Key，请联系管理员获取"}
         )
     return {"phone": phone, "remaining": balance}
 

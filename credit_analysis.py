@@ -1,5 +1,5 @@
 # credit_analysis.py
-# 征信分析核心逻辑（精度优化版：先加后除，美化排版，简洁评价）
+# 征信分析核心逻辑（精简版）
 
 import re
 import base64
@@ -65,7 +65,7 @@ def is_micro(inst: str) -> bool:
     return any(kw in inst for kw in MICRO_KEYWORDS) or "银行" not in inst
 
 def extract_loans(text: str) -> Dict[str, Any]:
-    """提取贷款信息（精度优化：先加后除）"""
+    """提取贷款信息"""
     insts = {}
     for line in text.split('\n'):
         line = line.strip()
@@ -137,7 +137,7 @@ def extract_loans(text: str) -> Dict[str, Any]:
     return loans
 
 def extract_credits(text: str) -> Dict[str, Any]:
-    """提取信用卡信息（精度优化：先加后除）"""
+    """提取信用卡信息"""
     credits = {
         "count": 0, 
         "limit": 0.0, 
@@ -213,12 +213,12 @@ def extract_guarantee(text: str) -> Tuple[int, float]:
     return count, balance
 
 def extract_queries(text: str, report_date: datetime) -> Dict[str, int]:
-    """提取查询记录（机构查询 + 本人查询）- 使用HTML表格匹配"""
+    """提取查询记录（机构查询 + 本人查询）"""
     queries = {"30d": 0, "31_90d": 0, "91_180d": 0, "181_360d": 0, "micro_60d": 0, "self_60d": 0}
     valid_reasons = ["贷款审批", "信用卡审批", "资信审查", "担保资格审查", "保前审查", "法人代表"]
     
-    # ========== 机构查询 ==========
-    pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
+    # 机构查询
+    pattern_with_id = r'<td[^>]*>\d+<tr>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</tr>'
     pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>([^<]+)</td>\s*<td[^>]*>([^<]+)</td>'
     
     matches = re.findall(pattern_with_id, text)
@@ -247,9 +247,9 @@ def extract_queries(text: str, report_date: datetime) -> Dict[str, int]:
         except:
             pass
     
-    # ========== 本人查询 ==========
-    self_pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
-    self_pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</td>'
+    # 本人查询
+    self_pattern_with_id = r'<td[^>]*>\d+</td>\s*<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</table>\s*<td[^>]*>本人</td>'
+    self_pattern_no_id = r'<td[^>]*>(\d{4}年\d{1,2}月\d{1,2}日)</td>\s*<td[^>]*>本人</tr>'
     
     self_matches = re.findall(self_pattern_with_id, text)
     if not self_matches:
@@ -315,7 +315,13 @@ def build_risk_warning(asset_cnt, asset_bal, adv_cnt, adv_amt, loans, credits, p
 
 def build_llm_prompt(stats: Dict) -> str:
     q, l, c, o = stats["queries"], stats["loans"], stats["credits"], stats["overdue"]
-    return f"""你是一名资深的助贷风控专家。请基于以下【真实统计数据】生成专业征信分析报告（仅第二部分：展开分析）。
+    return f"""你是一名资深有涵养的助贷中介，请以专业且亲和的口吻，基于以下真实统计数据生成征信分析报告。
+
+要求：
+1. 用通俗易懂的话详细分析数据背后的信息，让客户能理解自己的信用状况
+2. 不要说教，要像朋友一样给建议
+3. 分析要有温度，让客户感受到你的专业和关心
+4. 不要输出"好的"、"收到"等开场白，直接输出分析内容
 
 ### 基础信息
 - 性别：{stats['gender']}，年龄：{stats['age']}，婚姻：{stats['marriage']}
@@ -338,7 +344,15 @@ def build_llm_prompt(stats: Dict) -> str:
 ### 逾期记录
 - 总逾期月数：{o['total_months']}个月，90天以上账户：{o['90d_count']}个
 
-请直接输出分析内容，不要输出"好的"、"收到"等开场白，直接输出分析内容。按以下结构输出：基本信息解读、查询记录分析、逾期记录分析、贷款信息分析、信用卡信息分析、综合评估与风控建议。每个判断都要有数据支撑。"""
+请按以下结构输出：
+1️⃣基本信息解读
+2️⃣查询记录分析
+3️⃣逾期记录分析
+4️⃣贷款信息分析
+5️⃣信用卡信息分析
+6️⃣综合评估与风控建议
+
+每个判断都要有数据支撑，详细分析数据背后的信息。"""
 
 def call_deepseek(prompt: str) -> str:
     resp = requests.post(config.DEEPSEEK_API_URL, 
@@ -350,7 +364,7 @@ def call_deepseek(prompt: str) -> str:
     return resp.json()["choices"][0]["message"]["content"]
 
 def generate_report(markdown_text: str) -> Tuple[Dict, list]:
-    """生成完整报告，返回 (stats, report_lines) - 美化版 + 简洁评价"""
+    """生成完整报告，返回 (stats, report_lines)"""
     report_date = extract_report_date(markdown_text)
     gender, age, marriage = extract_basic_info(markdown_text, report_date)
     
@@ -364,7 +378,6 @@ def generate_report(markdown_text: str) -> Tuple[Dict, list]:
     queries = extract_queries(markdown_text, report_date)
     risk_warn = build_risk_warning(a_cnt, a_bal, ad_cnt, ad_amt, loans, credits, pub_rec)
     
-    # 统一约分：所有金额保留2位小数
     balance_yuan = round(loans["balance"], 2)
     housing_balance_yuan = round(loans["housing_balance"], 2)
     car_balance_yuan = round(loans["car_balance"], 2)
@@ -383,10 +396,9 @@ def generate_report(markdown_text: str) -> Tuple[Dict, list]:
         "overdue": overdue
     }
     
-    # 构建报告第一部分（美化排版）
+    # 构建报告第一部分
     lines = []
     
-    # 1️⃣ 基础信息
     lines.append("1️⃣ 基础信息")
     lines.append(f"性别：{gender}")
     lines.append(f"年龄：{age}岁")
@@ -397,7 +409,6 @@ def generate_report(markdown_text: str) -> Tuple[Dict, list]:
         lines.append(f"🚨 风险预警：{risk_warn}")
     lines.append("")
     
-    # 2️⃣ 查询记录
     lines.append("2️⃣ 查询记录")
     lines.append("时间范围      查询次数")
     lines.append("────────────────────")
@@ -406,12 +417,11 @@ def generate_report(markdown_text: str) -> Tuple[Dict, list]:
     lines.append(f"90–180天      {queries['91_180d']} 次")
     lines.append(f"180–360天     {queries['181_360d']} 次")
     lines.append("")
-    lines.append("📌 特殊标记")
+    lines.append("特殊标记")
     lines.append(f"60天内网贷查询：{queries['micro_60d']} 次")
     lines.append(f"60天内本人查询（本人临柜/网查）：{queries['self_60d']} 次")
     lines.append("")
     
-    # 查询记录简洁评价
     if queries['micro_60d'] == 0:
         lines.append("✓ 近60天无网贷查询记录，征信查询状况良好")
     elif queries['micro_60d'] <= 2:
@@ -420,7 +430,6 @@ def generate_report(markdown_text: str) -> Tuple[Dict, list]:
         lines.append("⚠️ 近60天网贷查询{}次，查询较为频繁，建议控制申请频率".format(queries['micro_60d']))
     lines.append("")
     
-    # 3️⃣ 逾期记录（5年内）
     lines.append("3️⃣ 逾期记录（5年内）")
     lines.append(f"逾期总月数：{overdue['total_months']} 个月")
     lines.append(f"90天以上账户：{overdue['90d_count']} 个")
@@ -428,7 +437,6 @@ def generate_report(markdown_text: str) -> Tuple[Dict, list]:
         lines.append("✓ 无逾期记录，信用履约良好")
     lines.append("")
     
-    # 4️⃣ 贷款总览
     lines.append("4️⃣ 贷款总览")
     lines.append("项目          数值")
     lines.append("────────────────────")
@@ -461,7 +469,6 @@ def generate_report(markdown_text: str) -> Tuple[Dict, list]:
     
     lines.append("")
     
-    # 贷款总览简洁评价
     if loans['count'] == 0:
         lines.append("✓ 无贷款记录，信用记录较新")
     elif loans['micro_count'] / loans['count'] > 0.5:
@@ -470,7 +477,6 @@ def generate_report(markdown_text: str) -> Tuple[Dict, list]:
         lines.append("✓ 贷款结构合理，继续保持")
     lines.append("")
     
-    # 5️⃣ 信用卡使用情况
     lines.append("5️⃣ 信用卡使用情况")
     lines.append(f"发卡机构数：{credits['count']} 家")
     lines.append(f"总授信额度：{credit_limit_yuan} 万元")
@@ -487,7 +493,6 @@ def generate_report(markdown_text: str) -> Tuple[Dict, list]:
     lines.append(f"使用率：{rate}%{rate_icon}")
     lines.append("")
     
-    # 信用卡使用情况简洁评价
     if credits['count'] == 0:
         lines.append("✓ 无信用卡记录")
     elif rate > 100:
@@ -498,14 +503,12 @@ def generate_report(markdown_text: str) -> Tuple[Dict, list]:
         lines.append("✓ 信用卡使用状况良好")
     lines.append("")
     
-    # 6️⃣ 担保信息
     if g_cnt > 0:
         lines.append("6️⃣ 担保信息")
         lines.append(f"担保户数：{g_cnt} 户")
         lines.append(f"担保余额：{guarantee_balance_yuan} 万元")
         lines.append("")
     
-    # 7️⃣ 公共记录
     if pub_rec:
         lines.append("7️⃣ 公共记录 ⚠️")
         lines.append(pub_rec)
