@@ -1,5 +1,5 @@
 # admin_routes.py
-# 管理后台路由（含日志、统计图表、数据导出）
+# 管理后台路由（含日志、统计图表、数据导出、访问统计）
 
 from fastapi import APIRouter, HTTPException, Depends, Form, Query
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -52,7 +52,7 @@ async def admin_page():
         .search-box{display:flex;gap:10px;margin:16px 0;align-items:center}
         .search-box input{flex:1;padding:8px;border:1px solid #ddd;border-radius:8px}
         .search-box button{padding:8px 16px;margin:0}
-        .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:20px}
+        .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:20px}
         .stat-card{background:#f8f9fa;border-radius:12px;padding:16px;text-align:center}
         .stat-number{font-size:28px;font-weight:bold;color:#1e3c72}
         .stat-label{color:#666;margin-top:8px}
@@ -211,7 +211,7 @@ function renderUserList(users) {
     let html = '<table style="width:100%;border-collapse:collapse;">';
     html += '<thead><tr>' +
             '<th>手机号</th><th>API Key</th><th>剩余次数</th><th>有效期</th><th>创建时间</th><th>最后使用</th><th>操作</th>' +
-            '<tr></thead><tbody>';
+            '</table></thead><tbody>';
     for (const u of users) {
         const created = u.created_at ? new Date(u.created_at).toLocaleString('zh-CN') : '-';
         const lastUsed = u.last_used_at ? new Date(u.last_used_at).toLocaleString('zh-CN') : '未使用';
@@ -327,6 +327,8 @@ async function loadStats() {
             <div class="stat-card"><div class="stat-number">${data.userStats.total}</div><div class="stat-label">总用户数</div></div>
             <div class="stat-card"><div class="stat-number">${data.userStats.total_balance}</div><div class="stat-label">总剩余次数</div></div>
             <div class="stat-card"><div class="stat-number">${data.totalCalls}</div><div class="stat-label">总调用次数</div></div>
+            <div class="stat-card"><div class="stat-number">${data.todayVisits || 0}</div><div class="stat-label">今日访问量</div></div>
+            <div class="stat-card"><div class="stat-number">${data.totalVisits || 0}</div><div class="stat-label">全部访问量</div></div>
         `;
         
         if (statsChart) statsChart.destroy();
@@ -372,7 +374,7 @@ async function loadLogs() {
                 <td style="padding:8px;">${log.details || '-'}</td>
             </tr>`;
         }
-        html += '</tbody></table>';
+        html += '</tbody><table>';
         logDiv.innerHTML = html;
     } catch(e) { logDiv.innerHTML = `<div class="result error">加载失败: ${e.message}</div>`; }
 }
@@ -478,11 +480,18 @@ async def get_stats(_=Depends(auth.verify_admin_request)):
     total_calls = sum(s.get("total_calls", 0) for s in usage_stats)
     chart_labels = [s.get("date", "") for s in usage_stats]
     chart_data = [s.get("total_calls", 0) for s in usage_stats]
+    
+    # 获取访问统计
+    today_visits = database.get_today_visits()
+    total_visits = database.get_total_visits()
+    
     return {
         "userStats": user_stats,
         "totalCalls": total_calls,
         "chartLabels": chart_labels,
-        "chartData": chart_data
+        "chartData": chart_data,
+        "todayVisits": today_visits,
+        "totalVisits": total_visits
     }
 
 

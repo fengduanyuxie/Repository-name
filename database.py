@@ -11,10 +11,11 @@ db = None
 users_collection = None
 logs_collection = None
 stats_collection = None
+visit_stats_collection = None
 
 def init_db():
     """初始化数据库连接"""
-    global mongo_client, db, users_collection, logs_collection, stats_collection
+    global mongo_client, db, users_collection, logs_collection, stats_collection, visit_stats_collection
     if not config.MONGO_URI:
         print("警告: MONGO_URI 未设置")
         return False
@@ -25,12 +26,14 @@ def init_db():
         users_collection = db["users"]
         logs_collection = db["admin_logs"]
         stats_collection = db["usage_stats"]
+        visit_stats_collection = db["visit_stats"]
         
         users_collection.create_index("phone", unique=True)
         users_collection.create_index("api_key", unique=True)
         users_collection.create_index("expire_at")
         logs_collection.create_index("created_at")
         stats_collection.create_index("date", unique=True)
+        visit_stats_collection.create_index("date", unique=True)
         
         print("MongoDB 连接成功")
         return True
@@ -174,3 +177,41 @@ def get_usage_stats(days: int = 30):
         {"date": {"$gte": start_date}},
         {"_id": 0}
     ).sort("date", 1))
+
+# ========== 访问统计 ==========
+def record_visit():
+    """记录一次访问"""
+    if visit_stats_collection is None:
+        return
+    today = datetime.now().strftime("%Y-%m-%d")
+    visit_stats_collection.update_one(
+        {"date": today},
+        {"$inc": {"count": 1}, "$setOnInsert": {"date": today}},
+        upsert=True
+    )
+
+def get_visit_stats(days: int = 30):
+    """获取最近N天的访问统计"""
+    if visit_stats_collection is None:
+        return []
+    start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    return list(visit_stats_collection.find(
+        {"date": {"$gte": start_date}},
+        {"_id": 0}
+    ).sort("date", 1))
+
+def get_today_visits():
+    """获取今日访问量"""
+    if visit_stats_collection is None:
+        return 0
+    today = datetime.now().strftime("%Y-%m-%d")
+    result = visit_stats_collection.find_one({"date": today})
+    return result["count"] if result else 0
+
+def get_total_visits():
+    """获取全部访问量"""
+    if visit_stats_collection is None:
+        return 0
+    pipeline = [{"$group": {"_id": None, "total": {"$sum": "$count"}}}]
+    result = list(visit_stats_collection.aggregate(pipeline))
+    return result[0]["total"] if result else 0
