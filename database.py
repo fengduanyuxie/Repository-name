@@ -11,10 +11,11 @@ db = None
 users_collection = None
 logs_collection = None
 stats_collection = None
+visit_stats_collection = None
 
 def init_db():
     """初始化数据库连接"""
-    global mongo_client, db, users_collection, logs_collection, stats_collection
+    global mongo_client, db, users_collection, logs_collection, stats_collection, visit_stats_collection
     if not config.MONGO_URI:
         print("警告: MONGO_URI 未设置")
         return False
@@ -25,12 +26,14 @@ def init_db():
         users_collection = db["users"]
         logs_collection = db["admin_logs"]
         stats_collection = db["usage_stats"]
+        visit_stats_collection = db["visit_stats"]
         
         users_collection.create_index("phone", unique=True)
         users_collection.create_index("api_key", unique=True)
         users_collection.create_index("expire_at")
         logs_collection.create_index("created_at")
         stats_collection.create_index("date", unique=True)
+        visit_stats_collection.create_index("date", unique=True)
         
         print("MongoDB 连接成功")
         return True
@@ -174,3 +177,40 @@ def get_usage_stats(days: int = 30):
         {"date": {"$gte": start_date}},
         {"_id": 0}
     ).sort("date", 1))
+
+# ========== 访问量统计 ==========
+def record_visit():
+    """记录一次访问"""
+    if visit_stats_collection is None:
+        return
+    today = datetime.now().strftime("%Y-%m-%d")
+    visit_stats_collection.update_one(
+        {"date": today},
+        {"$inc": {"count": 1}, "$setOnInsert": {"date": today}},
+        upsert=True
+    )
+    # 同时更新总访问量
+    if db is not None:
+        total_stats = db["total_stats"]
+        total_stats.update_one(
+            {"_id": "total_visits"},
+            {"$inc": {"count": 1}},
+            upsert=True
+        )
+
+def get_visit_stats():
+    """获取访问量统计，返回 (今日访问量, 总访问量)"""
+    today_count = 0
+    total_count = 0
+    
+    if visit_stats_collection is not None:
+        today = datetime.now().strftime("%Y-%m-%d")
+        today_doc = visit_stats_collection.find_one({"date": today})
+        today_count = today_doc.get("count", 0) if today_doc else 0
+    
+    if db is not None:
+        total_stats = db["total_stats"]
+        total_doc = total_stats.find_one({"_id": "total_visits"})
+        total_count = total_doc.get("count", 0) if total_doc else 0
+    
+    return today_count, total_count

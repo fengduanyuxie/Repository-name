@@ -23,7 +23,7 @@ async def admin_page():
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>管理后台</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
         body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f0f2f5;padding:20px}
@@ -41,10 +41,24 @@ async def admin_page():
         .result{margin-top:16px;padding:12px;border-radius:8px;display:none}
         .result.success{background:#e8f8f0;border:1px solid #2e7d32;display:block}
         .result.error{background:#ffebee;border:1px solid #c62828;display:block}
+<<<<<<< HEAD
         table{width:100%;border-collapse:collapse;margin-top:16px}
         th,td{padding:12px;text-align:left;border-bottom:1px solid #eee;vertical-align:top}
         th{background:#f5f5f5;font-weight:600}
         .actions button{padding:4px 12px;margin:0 4px;font-size:12px}
+=======
+        table{width:100%;border-collapse:collapse;margin-top:16px;table-layout:fixed}
+        th,td{padding:12px;text-align:left;border-bottom:1px solid #eee;vertical-align:middle;word-break:break-all;white-space:normal}
+        th{background:#f5f5f5;font-weight:600}
+        th:nth-child(1),td:nth-child(1){width:12%}
+        th:nth-child(2),td:nth-child(2){width:28%}
+        th:nth-child(3),td:nth-child(3){width:8%;text-align:center}
+        th:nth-child(4),td:nth-child(4){width:15%}
+        th:nth-child(5),td:nth-child(5){width:15%}
+        th:nth-child(6),td:nth-child(6){width:12%}
+        th:nth-child(7),td:nth-child(7){width:10%}
+        td:nth-child(3){text-align:center}
+>>>>>>> 24e32a1fe056b55953b2483775e1514832413729
         .danger{background:#dc3545}
         .danger:hover{background:#c82333}
         .logout-btn{float:right;background:#6c757d}
@@ -69,6 +83,8 @@ async def admin_page():
         .export-box .form-group{flex:1;min-width:180px}
         .export-box button{margin:0}
         .date-input{width:100%}
+        .copy-key-btn{margin-left:8px;padding:2px 8px;font-size:12px;background:#28a745}
+        .copy-key-btn:hover{background:#218838}
     </style>
 </head>
 <body>
@@ -107,6 +123,12 @@ function logout() { localStorage.removeItem(tokenKey); showLoginPage(); }
 
 async function showAdminPanel() {
     const token = localStorage.getItem(tokenKey);
+    // 验证 token 有效性
+    try {
+        const testResp = await fetch('/admin/users', { headers: {'Authorization': `Bearer ${token}`} });
+        if (testResp.status === 401) { logout(); return; }
+    } catch(e) { logout(); return; }
+    
     document.getElementById('app').innerHTML = `
         <div class="container">
             <div class="card">
@@ -174,9 +196,11 @@ async function showAdminPanel() {
                 </div>
             </div>
         </div>`;
-    loadUsers();
-    loadStats();
-    loadLogs();
+    setTimeout(() => {
+        loadUsers();
+        loadStats();
+        loadLogs();
+    }, 100);
 }
 
 function showTab(tabName) {
@@ -188,6 +212,18 @@ function showTab(tabName) {
 
 let allUsers = [];
 let statsChart = null;
+
+function copyNewApiKey() {
+    const apiKeyElement = document.getElementById('newApiKey');
+    if (apiKeyElement) {
+        const apiKey = apiKeyElement.innerText;
+        navigator.clipboard.writeText(apiKey).then(function() {
+            alert('✅ API Key已复制到剪贴板');
+        }).catch(function() {
+            alert('❌ 复制失败，请手动复制');
+        });
+    }
+}
 
 async function loadUsers() {
     const token = localStorage.getItem(tokenKey);
@@ -210,6 +246,7 @@ function renderUserList(users) {
         tableDiv.innerHTML = '<div style="padding:20px;text-align:center;color:#666;">暂无用户</div>'; 
         return; 
     }
+<<<<<<< HEAD
     let html = '<table style="width:100%;border-collapse:collapse;">';
     html += '<thead>' +
             '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">手机号</th>' +
@@ -219,6 +256,11 @@ function renderUserList(users) {
             '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">创建时间</th>' +
             '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">最后使用</th>' +
             '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">操作</th>' +
+=======
+    let html = '<table>';
+    html += '<thead><tr>' +
+            '<th>手机号</th><th>API Key</th><th>剩余次数</th><th>有效期</th><th>创建时间</th><th>最后使用</th><th>操作</th>' +
+>>>>>>> 24e32a1fe056b55953b2483775e1514832413729
             '</tr></thead><tbody>';
     for (const u of users) {
         const created = u.created_at ? new Date(u.created_at).toLocaleString('zh-CN') : '-';
@@ -231,6 +273,7 @@ function renderUserList(users) {
             return m;
         });
         html += `<tr>
+<<<<<<< HEAD
             <td style="padding:12px;border-bottom:1px solid #eee;">${escapedPhone}</td>
             <td style="padding:12px;border-bottom:1px solid #eee;font-family:monospace;font-size:12px;word-break:break-all;max-width:300px;">${u.api_key || ''}</td>
             <td style="padding:12px;border-bottom:1px solid #eee;text-align:center;font-weight:bold;">${u.balance || 0}</td>
@@ -240,6 +283,17 @@ function renderUserList(users) {
             <td style="padding:12px;border-bottom:1px solid #eee;">
                 <button onclick="recharge('${escapedPhone}')" style="padding:4px 12px;margin:0 4px;background:#4a90e2;color:#fff;border:none;border-radius:6px;cursor:pointer;">充值</button>
                 <button onclick="del('${escapedPhone}')" style="padding:4px 12px;margin:0 4px;background:#dc3545;color:#fff;border:none;border-radius:6px;cursor:pointer;">删除</button>
+=======
+            <td>${escapedPhone}</td>
+            <td style="word-break:break-all;white-space:normal;">${u.api_key || ''}</td>
+            <td style="text-align:center;">${u.balance || 0}</td>
+            <td>${expireAt}</td>
+            <td>${created}</td>
+            <td>${lastUsed}</td>
+            <td>
+                <button onclick="recharge('${escapedPhone}')">充值</button>
+                <button onclick="del('${escapedPhone}')" style="background:#dc3545">删除</button>
+>>>>>>> 24e32a1fe056b55953b2483775e1514832413729
             </td>
         </tr>`;
     }
@@ -275,7 +329,7 @@ async function addUser() {
         const data = await resp.json();
         if (resp.ok) {
             resDiv.className='result success';
-            resDiv.innerHTML = `✅ 成功！<br>手机号: ${data.phone}<br>API Key: <strong style="font-family:monospace;word-break:break-all;">${data.api_key}</strong><br>剩余次数: ${data.balance}`;
+            resDiv.innerHTML = `✅ 成功！<br>手机号: ${data.phone}<br>API Key: <strong style="font-family:monospace;word-break:break-all;" id="newApiKey">${data.api_key}</strong><button class="copy-key-btn" onclick="copyNewApiKey()">📋 复制</button><br>剩余次数: ${data.balance}`;
             document.getElementById('phone').value = '';
             loadUsers();
             loadStats();
@@ -325,35 +379,52 @@ async function del(phone) {
 
 async function loadStats() {
     const token = localStorage.getItem(tokenKey);
+    if (!token) { logout(); return; }
     try {
-        const resp = await fetch('/admin/stats', { headers: {'Authorization': `Bearer ${token}`} });
+        const resp = await fetch('/admin/stats', { 
+            headers: {'Authorization': `Bearer ${token}`},
+            cache: 'no-cache'
+        });
         if (resp.status === 401) { logout(); return; }
+        if (!resp.ok) throw new Error('加载失败');
         const data = await resp.json();
         
         const statsGrid = document.getElementById('statsGrid');
-        statsGrid.innerHTML = `
-            <div class="stat-card"><div class="stat-number">${data.userStats.total}</div><div class="stat-label">总用户数</div></div>
-            <div class="stat-card"><div class="stat-number">${data.userStats.total_balance}</div><div class="stat-label">总剩余次数</div></div>
-            <div class="stat-card"><div class="stat-number">${data.totalCalls}</div><div class="stat-label">总调用次数</div></div>
-        `;
+        if (statsGrid) {
+            statsGrid.innerHTML = `
+                <div class="stat-card"><div class="stat-number">${data.userStats.total || 0}</div><div class="stat-label">总用户数</div></div>
+                <div class="stat-card"><div class="stat-number">${data.userStats.total_balance || 0}</div><div class="stat-label">总剩余次数</div></div>
+                <div class="stat-card"><div class="stat-number">${data.totalCalls || 0}</div><div class="stat-label">总调用次数</div></div>
+                <div class="stat-card"><div class="stat-number">${data.todayVisits || 0}</div><div class="stat-label">今日访问量</div></div>
+                <div class="stat-card"><div class="stat-number">${data.totalVisits || 0}</div><div class="stat-label">总访问量</div></div>
+            `;
+        }
         
+        const ctx = document.getElementById('statsChart');
         if (statsChart) statsChart.destroy();
-        const ctx = document.getElementById('statsChart').getContext('2d');
-        statsChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: data.chartLabels,
-                datasets: [{
-                    label: '每日调用次数',
-                    data: data.chartData,
-                    borderColor: '#4a90e2',
-                    backgroundColor: 'rgba(74,144,226,0.1)',
-                    fill: true
-                }]
-            },
-            options: { responsive: true, maintainAspectRatio: true }
-        });
-    } catch(e) { console.error(e); }
+        if (ctx && typeof Chart !== 'undefined' && data.chartLabels && data.chartLabels.length > 0) {
+            statsChart = new Chart(ctx.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: data.chartLabels,
+                    datasets: [{
+                        label: '每日调用次数',
+                        data: data.chartData,
+                        borderColor: '#4a90e2',
+                        backgroundColor: 'rgba(74,144,226,0.1)',
+                        fill: true
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: true }
+            });
+        } else if (ctx) {
+            ctx.innerHTML = '<div style="padding:20px;text-align:center;color:#999;">暂无统计数据</div>';
+        }
+    } catch(e) { 
+        console.error('loadStats错误:', e);
+        const statsGrid = document.getElementById('statsGrid');
+        if (statsGrid) statsGrid.innerHTML = '<div class="result error">统计加载失败，请刷新重试</div>';
+    }
 }
 
 async function loadLogs() {
@@ -373,11 +444,11 @@ async function loadLogs() {
         for (const log of data.logs) {
             const time = log.created_at ? new Date(log.created_at).toLocaleString('zh-CN') : '-';
             html += `<tr>
-                <td style="padding:8px;">${time}</td>
-                <td style="padding:8px;">${log.admin || '-'}</td>
-                <td style="padding:8px;">${log.action || '-'}</td>
-                <td style="padding:8px;">${log.target || '-'}</td>
-                <td style="padding:8px;">${log.details || '-'}</td>
+                <td>${time}</td>
+                <td>${log.admin || '-'}</td>
+                <td>${log.action || '-'}</td>
+                <td>${log.target || '-'}</td>
+                <td>${log.details || '-'}</td>
             </tr>`;
         }
         html += '</tbody></table>';
@@ -486,11 +557,14 @@ async def get_stats(_=Depends(auth.verify_admin_request)):
     total_calls = sum(s.get("total_calls", 0) for s in usage_stats)
     chart_labels = [s.get("date", "") for s in usage_stats]
     chart_data = [s.get("total_calls", 0) for s in usage_stats]
+    today_visits, total_visits = database.get_visit_stats()
     return {
         "userStats": user_stats,
         "totalCalls": total_calls,
         "chartLabels": chart_labels,
-        "chartData": chart_data
+        "chartData": chart_data,
+        "todayVisits": today_visits,
+        "totalVisits": total_visits
     }
 
 
