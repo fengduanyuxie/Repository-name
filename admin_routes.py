@@ -41,14 +41,19 @@ async def admin_page():
         .result.success{background:#e8f8f0;border:1px solid #2e7d32;display:block}
         .result.error{background:#ffebee;border:1px solid #c62828;display:block}
         
-        /* 用户列表表格换行样式 */
+        /* 用户列表表格样式 - 7列对齐 + 强制换行 */
         .user-table{width:100%;border-collapse:collapse;table-layout:fixed}
-        .user-table th,.user-table td{padding:12px;text-align:left;border-bottom:1px solid #eee;word-wrap:break-word;word-break:break-all}
+        .user-table th,.user-table td{padding:10px 8px;text-align:left;border-bottom:1px solid #eee;vertical-align:top}
         .user-table th{background:#f5f5f5;font-weight:600}
-        .user-table .api-key-cell{font-family:monospace;font-size:12px;word-break:break-all}
-        .user-table .actions button{padding:4px 12px;margin:0 4px;font-size:12px}
-        .user-table .danger{background:#dc3545}
-        .user-table .danger:hover{background:#c82333}
+        .user-table .api-key-cell{font-family:monospace;font-size:12px;word-wrap:break-word;word-break:break-all;white-space:normal}
+        .user-table .date-cell{font-size:12px;word-wrap:break-word}
+        .user-table .balance-cell{text-align:center;font-weight:bold}
+        .user-table .actions{white-space:nowrap}
+        .user-table .actions button{padding:4px 10px;margin:0 3px;font-size:12px;border-radius:4px;cursor:pointer}
+        .user-table .actions .recharge-btn{background:#4a90e2;color:#fff;border:none}
+        .user-table .actions .recharge-btn:hover{background:#357abd}
+        .user-table .actions .delete-btn{background:#dc3545;color:#fff;border:none}
+        .user-table .actions .delete-btn:hover{background:#c82333}
         
         .logout-btn{float:right;background:#6c757d}
         .logout-btn:hover{background:#5a6268}
@@ -66,12 +71,14 @@ async def admin_page():
         .tab.active{color:#4a90e2;border-bottom:2px solid #4a90e2}
         .tab-content{display:none}
         .tab-content.active{display:block}
-        .log-table{font-size:12px}
-        .log-table td{word-break:break-all}
+        .log-table{font-size:12px;width:100%;border-collapse:collapse}
+        .log-table th,.log-table td{padding:8px;text-align:left;border-bottom:1px solid #eee}
         .export-box{display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap}
         .export-box .form-group{flex:1;min-width:180px}
         .export-box button{margin:0}
         .date-input{width:100%}
+        .copy-btn{background:#28a745;color:#fff;border:none;border-radius:6px;padding:6px 16px;margin-top:8px;cursor:pointer}
+        .copy-btn:hover{background:#218838}
     </style>
 </head>
 <body>
@@ -213,14 +220,16 @@ function renderUserList(users) {
         tableDiv.innerHTML = '<div style="padding:20px;text-align:center;color:#666;">暂无用户</div>'; 
         return; 
     }
-    let html = '<table class="user-table" style="width:100%;border-collapse:collapse;table-layout:fixed;">';
+    let html = '<table class="user-table">';
     html += '<thead>' +
             '<tr>' +
-            '<th style="width:15%">手机号</th>' +
-            '<th style="width:40%">API Key</th>' +
-            '<th style="width:10%">剩余次数</th>' +
-            '<th style="width:15%">有效期</th>' +
-            '<th style="width:20%">操作</th>' +
+            '<th style="width:10%">手机号</th>' +
+            '<th style="width:28%">API Key</th>' +
+            '<th style="width:8%">剩余次数</th>' +
+            '<th style="width:12%">有效期</th>' +
+            '<th style="width:15%">创建时间</th>' +
+            '<th style="width:15%">最后使用</th>' +
+            '<th style="width:12%">操作</th>' +
             '</tr>' +
             '</thead><tbody>';
     for (const u of users) {
@@ -235,12 +244,14 @@ function renderUserList(users) {
         });
         html += '<tr>' +
             '<td style="word-wrap:break-word;word-break:break-all;">' + escapedPhone + '</td>' +
-            '<td class="api-key-cell" style="word-wrap:break-word;word-break:break-all;font-family:monospace;font-size:12px;">' + (u.api_key || '') + '</td>' +
-            '<td style="text-align:center;font-weight:bold;">' + (u.balance || 0) + '</td>' +
+            '<td class="api-key-cell">' + (u.api_key || '') + '</td>' +
+            '<td class="balance-cell">' + (u.balance || 0) + '</td>' +
             '<td style="word-wrap:break-word;">' + expireAt + '</td>' +
+            '<td class="date-cell">' + created + '</td>' +
+            '<td class="date-cell">' + lastUsed + '</td>' +
             '<td class="actions">' +
-                '<button onclick="recharge(\'' + escapedPhone + '\')">充值</button>' +
-                '<button onclick="del(\'' + escapedPhone + '\')" class="danger">删除</button>' +
+                '<button class="recharge-btn" onclick="recharge(\'' + escapedPhone + '\')">充值</button>' +
+                '<button class="delete-btn" onclick="del(\'' + escapedPhone + '\')">删除</button>' +
             '</td>' +
             '</tr>';
     }
@@ -260,6 +271,16 @@ function clearSearch() {
     renderUserList(allUsers);
 }
 
+// 复制新用户信息
+function copyNewUserInfo(phone, apiKey, balance) {
+    const text = `手机号：${phone}\nAPI Key：${apiKey}\n剩余次数：${balance}次\n有效期：62天\n\n请在首页使用手机号和API Key登录分析`;
+    navigator.clipboard.writeText(text).then(() => {
+        alert('✅ 已复制用户信息到剪贴板');
+    }).catch(() => {
+        alert('❌ 复制失败，请手动复制');
+    });
+}
+
 async function addUser() {
     const token = localStorage.getItem(tokenKey);
     const phone = document.getElementById('phone').value;
@@ -276,7 +297,7 @@ async function addUser() {
         const data = await resp.json();
         if (resp.ok) {
             resDiv.className='result success';
-            resDiv.innerHTML = `✅ 成功！<br>手机号: ${data.phone}<br>API Key: <strong style="font-family:monospace;word-break:break-all;">${data.api_key}</strong><br>剩余次数: ${data.balance}`;
+            resDiv.innerHTML = `✅ 成功！<br>手机号: ${data.phone}<br>API Key: <strong style="font-family:monospace;word-break:break-all;" id="newApiKey">${data.api_key}</strong><br>剩余次数: ${data.balance}<br><br><button class="copy-btn" onclick="copyNewUserInfo('${data.phone}', '${data.api_key}', ${data.balance})">📋 复制信息</button>`;
             document.getElementById('phone').value = '';
             loadUsers();
             loadStats();
@@ -372,7 +393,7 @@ async function loadLogs() {
             logDiv.innerHTML = '<div style="padding:20px;text-align:center;color:#666;">暂无操作日志</div>';
             return;
         }
-        let html = '<table class="log-table"><thead><tr><th>时间</th><th>操作人</th><th>操作</th><th>目标</th><th>详情</th></tr></thead><tbody>';
+        let html = '<table class="log-table"><thead><tr><th>时间</th><th>操作人</th><th>操作</th><th>目标</th><th>详情</th><tr></thead><tbody>';
         for (const log of data.logs) {
             const time = log.created_at ? new Date(log.created_at).toLocaleString('zh-CN') : '-';
             html += `<tr>
