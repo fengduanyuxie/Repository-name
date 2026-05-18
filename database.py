@@ -1,5 +1,5 @@
 # database.py
-# MongoDB 数据库操作（含日志、统计、有效期、访问统计）
+# MongoDB 数据库操作（精简版：无支付、无临时存储）
 
 from datetime import datetime, timedelta
 from typing import Dict, Any, Tuple, List, Optional
@@ -60,7 +60,7 @@ def verify_user(phone: str, api_key: str) -> tuple:
     return False, 0
 
 def verify_user_exists(phone: str, api_key: str) -> tuple:
-    """验证用户是否存在（不计次数），返回 (是否存在, 用户信息, 剩余次数)"""
+    """验证用户是否存在，返回 (是否存在, 用户信息, 剩余次数)"""
     if users_collection is None:
         return False, None, 0
     user = users_collection.find_one({
@@ -178,7 +178,7 @@ def get_usage_stats(days: int = 30):
         {"_id": 0}
     ).sort("date", 1))
 
-# ========== 访问统计 ==========
+# ========== 访问量统计 ==========
 def record_visit():
     """记录一次访问"""
     if visit_stats_collection is None:
@@ -189,19 +189,28 @@ def record_visit():
         {"$inc": {"count": 1}, "$setOnInsert": {"date": today}},
         upsert=True
     )
+    # 同时更新总访问量
+    if db:
+        total_stats = db["total_stats"]
+        total_stats.update_one(
+            {"_id": "total_visits"},
+            {"$inc": {"count": 1}},
+            upsert=True
+        )
 
-def get_today_visits():
-    """获取今日访问量"""
-    if visit_stats_collection is None:
-        return 0
-    today = datetime.now().strftime("%Y-%m-%d")
-    result = visit_stats_collection.find_one({"date": today})
-    return result["count"] if result else 0
-
-def get_total_visits():
-    """获取全部访问量"""
-    if visit_stats_collection is None:
-        return 0
-    pipeline = [{"$group": {"_id": None, "total": {"$sum": "$count"}}}]
-    result = list(visit_stats_collection.aggregate(pipeline))
-    return result[0]["total"] if result else 0
+def get_visit_stats():
+    """获取访问量统计，返回 (今日访问量, 总访问量)"""
+    today_count = 0
+    total_count = 0
+    
+    if visit_stats_collection:
+        today = datetime.now().strftime("%Y-%m-%d")
+        today_doc = visit_stats_collection.find_one({"date": today})
+        today_count = today_doc.get("count", 0) if today_doc else 0
+    
+    if db:
+        total_stats = db["total_stats"]
+        total_doc = total_stats.find_one({"_id": "total_visits"})
+        total_count = total_doc.get("count", 0) if total_doc else 0
+    
+    return today_count, total_count

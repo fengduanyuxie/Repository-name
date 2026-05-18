@@ -188,8 +188,8 @@ async def analyze(
 
 {report_content}
 
-💡 19.9元/次 | 定制VIP套餐请联系管理员
-📱 微信:DXNBZ579"""
+💡 19.9元/次 | API Key获取请联系管理员
+📱 微信号：DXNBZ579"""
         
         return JSONResponse({"success": True, "full_report": final_report})
         
@@ -225,4 +225,4 @@ async def get_balance(phone: str, api_key: str):
 @router.get("/api/health")
 async def health():
     db_status = "connected" if database.users_collection is not None else "disconnected"
-    return {"status": "ok", "version": "v0515_final", "database": db_status}
+    return {"status": "ok", "version": "v051514", "database": db_status}
