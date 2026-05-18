@@ -1,5 +1,5 @@
 # main.py
-# 征信报告分析系统 - 主入口
+# 征信报告分析系统 - 主入口（精简版）
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,8 +25,6 @@ app.include_router(admin_router)
 # 前端页面
 @app.get("/")
 async def frontend():
-    # 记录访问量
-    database.record_visit()
     return HTMLResponse(content='''
 <!DOCTYPE html>
 <html lang="zh-CN">
