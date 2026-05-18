@@ -31,6 +31,7 @@ async def admin_page():
         .card{background:#fff;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}
         h1{color:#1e3c72;margin-bottom:24px;border-bottom:2px solid #4a90e2;padding-bottom:12px}
         h2{color:#333;margin-bottom:16px;font-size:18px}
+        h3{color:#555;margin-bottom:12px;font-size:16px}
         .login-box{max-width:400px;margin:100px auto}
         .form-group{margin-bottom:16px}
         label{display:block;margin-bottom:6px;color:#333;font-weight:500}
@@ -41,8 +42,9 @@ async def admin_page():
         .result.success{background:#e8f8f0;border:1px solid #2e7d32;display:block}
         .result.error{background:#ffebee;border:1px solid #c62828;display:block}
         table{width:100%;border-collapse:collapse;margin-top:16px}
-        th,td{padding:12px;text-align:left;border-bottom:1px solid #eee}
+        th,td{padding:12px;text-align:left;border-bottom:1px solid #eee;vertical-align:top}
         th{background:#f5f5f5;font-weight:600}
+        .actions button{padding:4px 12px;margin:0 4px;font-size:12px}
         .danger{background:#dc3545}
         .danger:hover{background:#c82333}
         .logout-btn{float:right;background:#6c757d}
@@ -56,7 +58,7 @@ async def admin_page():
         .stat-card{background:#f8f9fa;border-radius:12px;padding:16px;text-align:center}
         .stat-number{font-size:28px;font-weight:bold;color:#1e3c72}
         .stat-label{color:#666;margin-top:8px}
-        .tabs{display:flex;gap:10px;margin-bottom:20px;border-bottom:1px solid #ddd;flex-wrap:wrap}
+        .tabs{display:flex;gap:10px;margin-bottom:20px;border-bottom:1px solid #ddd}
         .tab{padding:10px 20px;cursor:pointer;background:none;border:none;font-size:14px}
         .tab.active{color:#4a90e2;border-bottom:2px solid #4a90e2}
         .tab-content{display:none}
@@ -209,9 +211,15 @@ function renderUserList(users) {
         return; 
     }
     let html = '<table style="width:100%;border-collapse:collapse;">';
-    html += '<thead><tr>' +
-            '<th>手机号</th><th>API Key</th><th>剩余次数</th><th>有效期</th><th>创建时间</th><th>最后使用</th><th>操作</th>' +
-            '<tr></thead><tbody>';
+    html += '<thead>' +
+            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">手机号</th>' +
+            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">API Key</th>' +
+            '<th style="padding:12px;text-align:center;border-bottom:1px solid #eee;background:#f5f5f5;">剩余次数</th>' +
+            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">有效期</th>' +
+            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">创建时间</th>' +
+            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">最后使用</th>' +
+            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">操作</th>' +
+            '</tr></thead><tbody>';
     for (const u of users) {
         const created = u.created_at ? new Date(u.created_at).toLocaleString('zh-CN') : '-';
         const lastUsed = u.last_used_at ? new Date(u.last_used_at).toLocaleString('zh-CN') : '未使用';
@@ -223,15 +231,15 @@ function renderUserList(users) {
             return m;
         });
         html += `<tr>
-            <td style="padding:12px;">${escapedPhone}</td>
-            <td style="padding:12px;font-family:monospace;font-size:12px;word-break:break-all;">${u.api_key || ''}</td>
-            <td style="padding:12px;text-align:center;font-weight:bold;">${u.balance || 0}</td>
-            <td style="padding:12px;">${expireAt}</td>
-            <td style="padding:12px;">${created}</td>
-            <td style="padding:12px;">${lastUsed}</td>
-            <td style="padding:12px;">
-                <button onclick="recharge('${escapedPhone}')">充值</button>
-                <button onclick="del('${escapedPhone}')" style="background:#dc3545">删除</button>
+            <td style="padding:12px;border-bottom:1px solid #eee;">${escapedPhone}</td>
+            <td style="padding:12px;border-bottom:1px solid #eee;font-family:monospace;font-size:12px;word-break:break-all;max-width:300px;">${u.api_key || ''}</td>
+            <td style="padding:12px;border-bottom:1px solid #eee;text-align:center;font-weight:bold;">${u.balance || 0}</td>
+            <td style="padding:12px;border-bottom:1px solid #eee;">${expireAt}</td>
+            <td style="padding:12px;border-bottom:1px solid #eee;">${created}</td>
+            <td style="padding:12px;border-bottom:1px solid #eee;">${lastUsed}</td>
+            <td style="padding:12px;border-bottom:1px solid #eee;">
+                <button onclick="recharge('${escapedPhone}')" style="padding:4px 12px;margin:0 4px;background:#4a90e2;color:#fff;border:none;border-radius:6px;cursor:pointer;">充值</button>
+                <button onclick="del('${escapedPhone}')" style="padding:4px 12px;margin:0 4px;background:#dc3545;color:#fff;border:none;border-radius:6px;cursor:pointer;">删除</button>
             </td>
         </tr>`;
     }

@@ -1,5 +1,5 @@
 # database.py
-# MongoDB 数据库操作（精简版：无支付、无临时存储）
+# MongoDB 数据库操作（含日志、统计、有效期）
 
 from datetime import datetime, timedelta
 from typing import Dict, Any, Tuple, List, Optional
@@ -57,7 +57,7 @@ def verify_user(phone: str, api_key: str) -> tuple:
     return False, 0
 
 def verify_user_exists(phone: str, api_key: str) -> tuple:
-    """验证用户是否存在，返回 (是否存在, 用户信息, 剩余次数)"""
+    """验证用户是否存在（不计次数），返回 (是否存在, 用户信息, 剩余次数)"""
     if users_collection is None:
         return False, None, 0
     user = users_collection.find_one({
@@ -90,9 +90,9 @@ def consume_balance(phone: str, api_key: str) -> bool:
     return False
 
 def generate_api_key(phone: str) -> str:
-    """生成 API Key"""
+    """生成 API Key（8位随机字符串）"""
     import secrets
-    return f"ak_{phone[-6:]}_{secrets.token_hex(8)}"
+    return f"ak_{phone[-6:]}_{secrets.token_hex(4)}"
 
 def add_or_recharge_user(phone: str, balance: int, days_valid: int = 62) -> Tuple[str, int]:
     """添加或充值用户，返回 (api_key, 新余额)"""
