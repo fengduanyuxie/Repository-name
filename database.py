@@ -1,5 +1,5 @@
 # database.py
-# MongoDB 数据库操作（精简版：无支付、无临时存储）
+# MongoDB 数据库操作（含日志、统计、有效期）
 
 from datetime import datetime, timedelta
 from typing import Dict, Any, Tuple, List, Optional
@@ -60,7 +60,7 @@ def verify_user(phone: str, api_key: str) -> tuple:
     return False, 0
 
 def verify_user_exists(phone: str, api_key: str) -> tuple:
-    """验证用户是否存在，返回 (是否存在, 用户信息, 剩余次数)"""
+    """验证用户是否存在（不计次数），返回 (是否存在, 用户信息, 剩余次数)"""
     if users_collection is None:
         return False, None, 0
     user = users_collection.find_one({
@@ -189,16 +189,6 @@ def record_visit():
         {"$inc": {"count": 1}, "$setOnInsert": {"date": today}},
         upsert=True
     )
-
-def get_visit_stats(days: int = 30):
-    """获取最近N天的访问统计"""
-    if visit_stats_collection is None:
-        return []
-    start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-    return list(visit_stats_collection.find(
-        {"date": {"$gte": start_date}},
-        {"_id": 0}
-    ).sort("date", 1))
 
 def get_today_visits():
     """获取今日访问量"""
