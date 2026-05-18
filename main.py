@@ -1,5 +1,5 @@
 # main.py
-# 征信报告分析系统 - 主入口（含访问统计）
+# 征信报告分析系统 - 主入口
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
