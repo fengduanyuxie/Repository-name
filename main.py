@@ -1,5 +1,5 @@
 # main.py
-# 征信报告分析系统 - 主入口（模块化版本 v051514 无支付）
+# 征信报告分析系统 - 主入口（v051514 无支付 用户界面）
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +20,7 @@ database.init_db()
 # 注册路由
 app.include_router(api_router)
 app.include_router(admin_router)
+
 
 # 前端页面
 @app.get("/")
@@ -248,6 +249,7 @@ async def frontend():
 </body>
 </html>
     ''')
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
