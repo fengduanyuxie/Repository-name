@@ -1,5 +1,5 @@
 # admin_routes.py
-# 管理后台路由（含日志、统计图表、数据导出、访问统计）
+# 管理后台路由（含日志、统计图表、数据导出）
 
 from fastapi import APIRouter, HTTPException, Depends, Form, Query
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -31,6 +31,7 @@ async def admin_page():
         .card{background:#fff;border-radius:16px;padding:24px;margin-bottom:20px;box-shadow:0 2px 10px rgba(0,0,0,0.1)}
         h1{color:#1e3c72;margin-bottom:24px;border-bottom:2px solid #4a90e2;padding-bottom:12px}
         h2{color:#333;margin-bottom:16px;font-size:18px}
+        h3{color:#555;margin-bottom:12px;font-size:16px}
         .login-box{max-width:400px;margin:100px auto}
         .form-group{margin-bottom:16px}
         label{display:block;margin-bottom:6px;color:#333;font-weight:500}
@@ -46,7 +47,7 @@ async def admin_page():
         .user-table th,.user-table td{padding:10px 8px;text-align:left;border-bottom:1px solid #eee;vertical-align:top}
         .user-table th{background:#f5f5f5;font-weight:600}
         .user-table .api-key-cell{font-family:monospace;font-size:12px;word-wrap:break-word;word-break:break-all;white-space:normal}
-        .user-table .date-cell{font-size:12px}
+        .user-table .date-cell{font-size:12px;word-wrap:break-word}
         .user-table .balance-cell{text-align:center;font-weight:bold}
         .user-table .actions{white-space:nowrap}
         .user-table .actions button{padding:4px 10px;margin:0 3px;font-size:12px;border-radius:4px;cursor:pointer}
@@ -62,17 +63,17 @@ async def admin_page():
         .search-box{display:flex;gap:10px;margin:16px 0;align-items:center}
         .search-box input{flex:1;padding:8px;border:1px solid #ddd;border-radius:8px}
         .search-box button{padding:8px 16px;margin:0}
-        .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:20px}
+        .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:20px}
         .stat-card{background:#f8f9fa;border-radius:12px;padding:16px;text-align:center}
         .stat-number{font-size:28px;font-weight:bold;color:#1e3c72}
         .stat-label{color:#666;margin-top:8px}
-        .tabs{display:flex;gap:10px;margin-bottom:20px;border-bottom:1px solid #ddd;flex-wrap:wrap}
+        .tabs{display:flex;gap:10px;margin-bottom:20px;border-bottom:1px solid #ddd}
         .tab{padding:10px 20px;cursor:pointer;background:none;border:none;font-size:14px}
         .tab.active{color:#4a90e2;border-bottom:2px solid #4a90e2}
         .tab-content{display:none}
         .tab-content.active{display:block}
-        .log-table{font-size:12px;width:100%;border-collapse:collapse}
-        .log-table th,.log-table td{padding:8px;text-align:left;border-bottom:1px solid #eee}
+        .log-table{font-size:12px}
+        .log-table td{word-break:break-all}
         .export-box{display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap}
         .export-box .form-group{flex:1;min-width:180px}
         .export-box button{margin:0}
@@ -253,7 +254,7 @@ function renderUserList(users) {
                 <button class="recharge-btn" onclick="recharge('${escapedPhone}')">充值</button>
                 <button class="delete-btn" onclick="del('${escapedPhone}')">删除</button>
             </td>
-        </tr>`;
+        <tr>`;
     }
     html += '</tbody></table>';
     tableDiv.innerHTML = html;

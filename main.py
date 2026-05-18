@@ -1,5 +1,5 @@
 # main.py
-# 征信报告分析系统 - 主入口
+# 征信报告分析系统 - 主入口（模块化版本 v051514 无支付）
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,11 +21,9 @@ database.init_db()
 app.include_router(api_router)
 app.include_router(admin_router)
 
-
 # 前端页面
 @app.get("/")
 async def frontend():
-    # 记录访问量
     database.record_visit()
     return HTMLResponse(content='''
 <!DOCTYPE html>
@@ -46,17 +44,11 @@ async def frontend():
         .remember-row{display:flex;justify-content:space-between;align-items:center;margin-top:8px}
         .remember-row label{display:flex;align-items:center;gap:6px;font-size:12px;color:#666;cursor:pointer}
         .clear-btn{background:none;border:none;color:#dc3545;font-size:12px;cursor:pointer}
-        .upload-area{border:2px dashed #4a90e2;border-radius:20px;padding:30px 20px;text-align:center;cursor:pointer;margin:16px 0;transition:all 0.3s}
+        .upload-area{border:2px dashed #4a90e2;border-radius:20px;padding:40px 20px;text-align:center;cursor:pointer;margin:16px 0;transition:all 0.3s}
         .upload-area:hover{background:#eef4ff;border-color:#357abd}
         .upload-icon{font-size:48px;margin-bottom:12px}
         .file-name{color:#2e7d32;font-size:14px;margin-top:8px}
-        .progress-container{display:none;margin-top:16px}
-        .progress-bar{background:#e0e0e0;border-radius:20px;height:8px;overflow:hidden}
-        .progress-fill{background:#4a90e2;width:0%;height:100%;transition:width 0.3s}
-        .progress-text{text-align:center;font-size:12px;color:#666;margin-top:8px}
-        .button-group{display:flex;gap:12px;margin-top:8px}
-        .button-group button{flex:1;margin-top:0}
-        button{background:#4a90e2;color:#fff;border:none;padding:14px 28px;border-radius:40px;font-size:16px;font-weight:500;cursor:pointer}
+        button{background:#4a90e2;color:#fff;border:none;padding:14px 28px;border-radius:40px;font-size:16px;font-weight:500;cursor:pointer;width:100%;margin-top:8px}
         button:hover{background:#357abd}
         button:disabled{background:#ccc;cursor:not-allowed}
         .btn-recharge{background:#28a745}
@@ -256,7 +248,6 @@ async def frontend():
 </body>
 </html>
     ''')
-
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))

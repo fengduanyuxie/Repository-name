@@ -1,5 +1,5 @@
 # database.py
-# MongoDB 数据库操作
+# MongoDB 数据库操作（含日志、统计、有效期）
 
 from datetime import datetime, timedelta
 from typing import Dict, Any, Tuple, List, Optional
@@ -60,7 +60,7 @@ def verify_user(phone: str, api_key: str) -> tuple:
     return False, 0
 
 def verify_user_exists(phone: str, api_key: str) -> tuple:
-    """验证用户是否存在，返回 (是否存在, 用户信息, 剩余次数)"""
+    """验证用户是否存在（不计次数），返回 (是否存在, 用户信息, 剩余次数)"""
     if users_collection is None:
         return False, None, 0
     user = users_collection.find_one({
