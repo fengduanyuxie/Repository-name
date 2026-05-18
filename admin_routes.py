@@ -1,5 +1,5 @@
 # admin_routes.py
-# 管理后台路由（含日志、统计图表、数据导出）
+# 管理后台路由（含日志、统计图表、数据导出、访问统计）
 
 from fastapi import APIRouter, HTTPException, Depends, Form, Query
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -40,11 +40,21 @@ async def admin_page():
         .result{margin-top:16px;padding:12px;border-radius:8px;display:none}
         .result.success{background:#e8f8f0;border:1px solid #2e7d32;display:block}
         .result.error{background:#ffebee;border:1px solid #c62828;display:block}
-        table{width:100%;border-collapse:collapse;margin-top:16px}
-        th,td{padding:12px;text-align:left;border-bottom:1px solid #eee}
-        th{background:#f5f5f5;font-weight:600}
-        .danger{background:#dc3545}
-        .danger:hover{background:#c82333}
+        
+        /* 用户列表表格样式 - 7列对齐 + 强制换行 */
+        .user-table{width:100%;border-collapse:collapse;table-layout:fixed}
+        .user-table th,.user-table td{padding:10px 8px;text-align:left;border-bottom:1px solid #eee;vertical-align:top}
+        .user-table th{background:#f5f5f5;font-weight:600}
+        .user-table .api-key-cell{font-family:monospace;font-size:12px;word-wrap:break-word;word-break:break-all;white-space:normal}
+        .user-table .date-cell{font-size:12px}
+        .user-table .balance-cell{text-align:center;font-weight:bold}
+        .user-table .actions{white-space:nowrap}
+        .user-table .actions button{padding:4px 10px;margin:0 3px;font-size:12px;border-radius:4px;cursor:pointer}
+        .user-table .actions .recharge-btn{background:#4a90e2;color:#fff;border:none}
+        .user-table .actions .recharge-btn:hover{background:#357abd}
+        .user-table .actions .delete-btn{background:#dc3545;color:#fff;border:none}
+        .user-table .actions .delete-btn:hover{background:#c82333}
+        
         .logout-btn{float:right;background:#6c757d}
         .logout-btn:hover{background:#5a6268}
         .refresh-btn{background:#28a745;float:right;margin-right:10px}
@@ -52,7 +62,7 @@ async def admin_page():
         .search-box{display:flex;gap:10px;margin:16px 0;align-items:center}
         .search-box input{flex:1;padding:8px;border:1px solid #ddd;border-radius:8px}
         .search-box button{padding:8px 16px;margin:0}
-        .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:20px}
+        .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:20px}
         .stat-card{background:#f8f9fa;border-radius:12px;padding:16px;text-align:center}
         .stat-number{font-size:28px;font-weight:bold;color:#1e3c72}
         .stat-label{color:#666;margin-top:8px}
@@ -61,12 +71,14 @@ async def admin_page():
         .tab.active{color:#4a90e2;border-bottom:2px solid #4a90e2}
         .tab-content{display:none}
         .tab-content.active{display:block}
-        .log-table{font-size:12px}
-        .log-table td{word-break:break-all}
+        .log-table{font-size:12px;width:100%;border-collapse:collapse}
+        .log-table th,.log-table td{padding:8px;text-align:left;border-bottom:1px solid #eee}
         .export-box{display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap}
         .export-box .form-group{flex:1;min-width:180px}
         .export-box button{margin:0}
         .date-input{width:100%}
+        .copy-btn{background:#28a745;color:#fff;border:none;border-radius:6px;padding:6px 16px;margin-top:8px;cursor:pointer}
+        .copy-btn:hover{background:#218838}
     </style>
 </head>
 <body>
@@ -208,10 +220,18 @@ function renderUserList(users) {
         tableDiv.innerHTML = '<div style="padding:20px;text-align:center;color:#666;">暂无用户</div>'; 
         return; 
     }
-    let html = '<table style="width:100%;border-collapse:collapse;">';
-    html += '<thead><tr>' +
-            '<th>手机号</th><th>API Key</th><th>剩余次数</th><th>有效期</th><th>创建时间</th><th>最后使用</th><th>操作</th>' +
-            '<tr></thead><tbody>';
+    let html = '<table class="user-table">';
+    html += '<thead>' +
+            '<tr>' +
+            '<th style="width:10%">手机号</th>' +
+            '<th style="width:28%">API Key</th>' +
+            '<th style="width:8%">剩余次数</th>' +
+            '<th style="width:12%">有效期</th>' +
+            '<th style="width:15%">创建时间</th>' +
+            '<th style="width:15%">最后使用</th>' +
+            '<th style="width:12%">操作</th>' +
+            '</tr>' +
+            '</thead><tbody>';
     for (const u of users) {
         const created = u.created_at ? new Date(u.created_at).toLocaleString('zh-CN') : '-';
         const lastUsed = u.last_used_at ? new Date(u.last_used_at).toLocaleString('zh-CN') : '未使用';
@@ -223,15 +243,15 @@ function renderUserList(users) {
             return m;
         });
         html += `<tr>
-            <td style="padding:12px;">${escapedPhone}</td>
-            <td style="padding:12px;font-family:monospace;font-size:12px;word-break:break-all;">${u.api_key || ''}</td>
-            <td style="padding:12px;text-align:center;font-weight:bold;">${u.balance || 0}</td>
-            <td style="padding:12px;">${expireAt}</td>
-            <td style="padding:12px;">${created}</td>
-            <td style="padding:12px;">${lastUsed}</td>
-            <td style="padding:12px;">
-                <button onclick="recharge('${escapedPhone}')">充值</button>
-                <button onclick="del('${escapedPhone}')" style="background:#dc3545">删除</button>
+            <td style="word-wrap:break-word;word-break:break-all;">${escapedPhone}</td>
+            <td class="api-key-cell">${u.api_key || ''}</td>
+            <td class="balance-cell">${u.balance || 0}</td>
+            <td style="word-wrap:break-word;">${expireAt}</td>
+            <td class="date-cell">${created}</td>
+            <td class="date-cell">${lastUsed}</td>
+            <td class="actions">
+                <button class="recharge-btn" onclick="recharge('${escapedPhone}')">充值</button>
+                <button class="delete-btn" onclick="del('${escapedPhone}')">删除</button>
             </td>
         </tr>`;
     }
@@ -251,6 +271,16 @@ function clearSearch() {
     renderUserList(allUsers);
 }
 
+// 复制新用户信息
+function copyNewUserInfo(phone, apiKey, balance) {
+    const text = `手机号：${phone}\\nAPI Key：${apiKey}\\n剩余次数：${balance}次\\n有效期：62天\\n\\n请在首页使用手机号和API Key登录分析`;
+    navigator.clipboard.writeText(text).then(() => {
+        alert('✅ 已复制用户信息到剪贴板');
+    }).catch(() => {
+        alert('❌ 复制失败，请手动复制');
+    });
+}
+
 async function addUser() {
     const token = localStorage.getItem(tokenKey);
     const phone = document.getElementById('phone').value;
@@ -267,7 +297,7 @@ async function addUser() {
         const data = await resp.json();
         if (resp.ok) {
             resDiv.className='result success';
-            resDiv.innerHTML = `✅ 成功！<br>手机号: ${data.phone}<br>API Key: <strong style="font-family:monospace;word-break:break-all;">${data.api_key}</strong><br>剩余次数: ${data.balance}`;
+            resDiv.innerHTML = `✅ 成功！<br>手机号: ${data.phone}<br>API Key: <strong style="font-family:monospace;word-break:break-all;">${data.api_key}</strong><br>剩余次数: ${data.balance}<br><br><button class="copy-btn" onclick="copyNewUserInfo('${data.phone}', '${data.api_key}', ${data.balance})">📋 复制信息</button>`;
             document.getElementById('phone').value = '';
             loadUsers();
             loadStats();
@@ -327,6 +357,8 @@ async function loadStats() {
             <div class="stat-card"><div class="stat-number">${data.userStats.total}</div><div class="stat-label">总用户数</div></div>
             <div class="stat-card"><div class="stat-number">${data.userStats.total_balance}</div><div class="stat-label">总剩余次数</div></div>
             <div class="stat-card"><div class="stat-number">${data.totalCalls}</div><div class="stat-label">总调用次数</div></div>
+            <div class="stat-card"><div class="stat-number">${data.todayVisits || 0}</div><div class="stat-label">今日访问量</div></div>
+            <div class="stat-card"><div class="stat-number">${data.totalVisits || 0}</div><div class="stat-label">全部访问量</div></div>
         `;
         
         if (statsChart) statsChart.destroy();
@@ -478,11 +510,18 @@ async def get_stats(_=Depends(auth.verify_admin_request)):
     total_calls = sum(s.get("total_calls", 0) for s in usage_stats)
     chart_labels = [s.get("date", "") for s in usage_stats]
     chart_data = [s.get("total_calls", 0) for s in usage_stats]
+    
+    # 获取访问统计
+    today_visits = database.get_today_visits()
+    total_visits = database.get_total_visits()
+    
     return {
         "userStats": user_stats,
         "totalCalls": total_calls,
         "chartLabels": chart_labels,
-        "chartData": chart_data
+        "chartData": chart_data,
+        "todayVisits": today_visits,
+        "totalVisits": total_visits
     }
 
 
