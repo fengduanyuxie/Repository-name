@@ -190,7 +190,7 @@ def record_visit():
         upsert=True
     )
     # 同时更新总访问量
-    if db:
+    if db is not None:
         total_stats = db["total_stats"]
         total_stats.update_one(
             {"_id": "total_visits"},
@@ -203,12 +203,12 @@ def get_visit_stats():
     today_count = 0
     total_count = 0
     
-    if visit_stats_collection:
+    if visit_stats_collection is not None:
         today = datetime.now().strftime("%Y-%m-%d")
         today_doc = visit_stats_collection.find_one({"date": today})
         today_count = today_doc.get("count", 0) if today_doc else 0
     
-    if db:
+    if db is not None:
         total_stats = db["total_stats"]
         total_doc = total_stats.find_one({"_id": "total_visits"})
         total_count = total_doc.get("count", 0) if total_doc else 0
