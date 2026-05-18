@@ -40,11 +40,16 @@ async def admin_page():
         .result{margin-top:16px;padding:12px;border-radius:8px;display:none}
         .result.success{background:#e8f8f0;border:1px solid #2e7d32;display:block}
         .result.error{background:#ffebee;border:1px solid #c62828;display:block}
-        table{width:100%;border-collapse:collapse;margin-top:16px}
-        th,td{padding:12px;text-align:left;border-bottom:1px solid #eee}
-        th{background:#f5f5f5;font-weight:600}
-        .danger{background:#dc3545}
-        .danger:hover{background:#c82333}
+        
+        /* 用户列表表格换行样式 */
+        .user-table{width:100%;border-collapse:collapse;table-layout:fixed}
+        .user-table th,.user-table td{padding:12px;text-align:left;border-bottom:1px solid #eee;word-wrap:break-word;word-break:break-all}
+        .user-table th{background:#f5f5f5;font-weight:600}
+        .user-table .api-key-cell{font-family:monospace;font-size:12px;word-break:break-all}
+        .user-table .actions button{padding:4px 12px;margin:0 4px;font-size:12px}
+        .user-table .danger{background:#dc3545}
+        .user-table .danger:hover{background:#c82333}
+        
         .logout-btn{float:right;background:#6c757d}
         .logout-btn:hover{background:#5a6268}
         .refresh-btn{background:#28a745;float:right;margin-right:10px}
@@ -208,10 +213,16 @@ function renderUserList(users) {
         tableDiv.innerHTML = '<div style="padding:20px;text-align:center;color:#666;">暂无用户</div>'; 
         return; 
     }
-    let html = '<table style="width:100%;border-collapse:collapse;">';
-    html += '<thead><tr>' +
-            '<th>手机号</th><th>API Key</th><th>剩余次数</th><th>有效期</th><th>创建时间</th><th>最后使用</th><th>操作</th>' +
-            '</table></thead><tbody>';
+    let html = '<table class="user-table" style="width:100%;border-collapse:collapse;table-layout:fixed;">';
+    html += '<thead>' +
+            '<tr>' +
+            '<th style="width:15%">手机号</th>' +
+            '<th style="width:40%">API Key</th>' +
+            '<th style="width:10%">剩余次数</th>' +
+            '<th style="width:15%">有效期</th>' +
+            '<th style="width:20%">操作</th>' +
+            '</tr>' +
+            '</thead><tbody>';
     for (const u of users) {
         const created = u.created_at ? new Date(u.created_at).toLocaleString('zh-CN') : '-';
         const lastUsed = u.last_used_at ? new Date(u.last_used_at).toLocaleString('zh-CN') : '未使用';
@@ -222,18 +233,16 @@ function renderUserList(users) {
             if (m === '>') return '&gt;';
             return m;
         });
-        html += `<tr>
-            <td style="padding:12px;">${escapedPhone}</td>
-            <td style="padding:12px;font-family:monospace;font-size:12px;word-break:break-all;">${u.api_key || ''}</td>
-            <td style="padding:12px;text-align:center;font-weight:bold;">${u.balance || 0}</td>
-            <td style="padding:12px;">${expireAt}</td>
-            <td style="padding:12px;">${created}</td>
-            <td style="padding:12px;">${lastUsed}</td>
-            <td style="padding:12px;">
-                <button onclick="recharge('${escapedPhone}')">充值</button>
-                <button onclick="del('${escapedPhone}')" style="background:#dc3545">删除</button>
-            </td>
-        </tr>`;
+        html += '<tr>' +
+            '<td style="word-wrap:break-word;word-break:break-all;">' + escapedPhone + '</td>' +
+            '<td class="api-key-cell" style="word-wrap:break-word;word-break:break-all;font-family:monospace;font-size:12px;">' + (u.api_key || '') + '</td>' +
+            '<td style="text-align:center;font-weight:bold;">' + (u.balance || 0) + '</td>' +
+            '<td style="word-wrap:break-word;">' + expireAt + '</td>' +
+            '<td class="actions">' +
+                '<button onclick="recharge(\'' + escapedPhone + '\')">充值</button>' +
+                '<button onclick="del(\'' + escapedPhone + '\')" class="danger">删除</button>' +
+            '</td>' +
+            '</tr>';
     }
     html += '</tbody></table>';
     tableDiv.innerHTML = html;
@@ -374,7 +383,7 @@ async function loadLogs() {
                 <td style="padding:8px;">${log.details || '-'}</td>
             </tr>`;
         }
-        html += '</tbody><table>';
+        html += '</tbody></table>';
         logDiv.innerHTML = html;
     } catch(e) { logDiv.innerHTML = `<div class="result error">加载失败: ${e.message}</div>`; }
 }
