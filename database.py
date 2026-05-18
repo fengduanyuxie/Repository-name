@@ -1,5 +1,5 @@
 # database.py
-# MongoDB 数据库操作（含日志、统计、有效期）
+# MongoDB 数据库操作（含日志、统计、有效期、访问统计）
 
 from datetime import datetime, timedelta
 from typing import Dict, Any, Tuple, List, Optional
@@ -93,9 +93,9 @@ def consume_balance(phone: str, api_key: str) -> bool:
     return False
 
 def generate_api_key(phone: str) -> str:
-    """生成 API Key"""
+    """生成 API Key（8位随机字符串）"""
     import secrets
-    return f"ak_{phone[-6:]}_{secrets.token_hex(8)}"
+    return f"ak_{phone[-6:]}_{secrets.token_hex(4)}"
 
 def add_or_recharge_user(phone: str, balance: int, days_valid: int = 62) -> Tuple[str, int]:
     """添加或充值用户，返回 (api_key, 新余额)"""
