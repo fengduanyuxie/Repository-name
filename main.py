@@ -43,9 +43,9 @@ async def frontend():
         /* 介绍区域 */
         .intro-card{background:#f8f9fa;border-radius:10px;padding:10px;margin-bottom:12px}
         .intro-title{font-size:11px;font-weight:bold;color:#1e3c72;margin-bottom:6px}
-        .scene-row{display:flex;justify-content:space-between;margin-bottom:8px;font-size:11px}
-        .scene-good{color:#2e7d32}
-        .scene-bad{color:#e67e22}
+        .scene-row{display:block;margin-bottom:8px;font-size:11px}
+        .scene-good{display:block;color:#2e7d32;margin-bottom:4px}
+        .scene-bad{display:block;color:#e67e22}
         .feature-item{margin-bottom:6px;font-size:11px;line-height:1.4}
         .feature-icon{font-weight:bold;color:#1e3c72;margin-right:6px}
         .feature-desc{color:#555;margin-left:22px}
@@ -98,7 +98,7 @@ async def frontend():
         </div>
         <div class="feature-item">
             <span class="feature-icon">💳 信用卡</span>
-            <div class="feature-desc">使用率：X% (超70%银行会谨慎)</div>
+            <div class="feature-desc">使用率：X% (分级警示)</div>
         </div>
         <div class="feature-item">
             <span class="feature-icon">📅 查询统计</span>
