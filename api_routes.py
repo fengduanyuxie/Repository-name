@@ -38,20 +38,57 @@ def clean_deepseek_response(text: str) -> str:
 
 
 def format_report_sections(text: str) -> str:
-    """格式化报告段落，添加空行和图标"""
-    text = re.sub(r'(\d+[\.\)、]|\u2460|\u2461|\u2462|\u2463|\u2464|\u2465)', r'\n\n\1', text)
-    text = re.sub(r'(建议[：:])', r'💡 \1', text)
-    text = re.sub(r'(风险[：:])', r'⚠️ \1', text)
+    """
+    格式化报告段落
+    1. 删除所有 📌 图标（包括独立和连在一起的）
+    2. 修正数字标题前的换行
+    3. 标题与内容之间无多余空行
+    """
+    import re
     
+    # 1. 删除所有 📌 图标（全局替换）
+    text = text.replace('📌', '')
+    
+    # 2. 删除 📌 后面可能跟着的空格
+    text = re.sub(r'📌\s*', '', text)
+    
+    # 3. 修正数字标题前的换行（将 \n\n1️⃣ 改为 \n1️⃣）
+    text = re.sub(r'\n{2,}([1-9]️\d)', r'\n\1', text)
+    text = re.sub(r'\n{2,}(\d+[\.\)、])', r'\n\1', text)
+    
+    # 4. 将数字序号 1. 2. 等转换为 1️⃣ 2️⃣ 等
+    def replace_number(match):
+        num = match.group(1)
+        emoji_map = {
+            '1': '1️⃣', '2': '2️⃣', '3': '3️⃣',
+            '4': '4️⃣', '5': '5️⃣', '6': '6️⃣',
+            '7': '7️⃣', '8': '8️⃣', '9': '9️⃣'
+        }
+        return emoji_map.get(num, num + '️⃣')
+    
+    text = re.sub(r'(\d+)[\.\)、]', replace_number, text)
+    
+    # 5. 为段落添加首行缩进
     lines = text.split('\n')
     formatted_lines = []
-    for line in lines:
-        if re.match(r'^\d+[\.\)、]', line) or re.match(r'^[\u2460-\u2465]', line):
-            if not line.startswith('📌'):
-                line = '📌 ' + line
-        formatted_lines.append(line)
     
-    return '\n'.join(formatted_lines)
+    for line in lines:
+        is_title = bool(re.match(r'^[1-9]️⃣', line.strip()))
+        if not line.strip():
+            formatted_lines.append(line)
+            continue
+        if is_title:
+            formatted_lines.append(line)
+        else:
+            if not line.startswith('    '):
+                formatted_lines.append('    ' + line)
+            else:
+                formatted_lines.append(line)
+    
+    result = '\n'.join(formatted_lines)
+    result = re.sub(r'\n{3,}', '\n\n', result)
+    
+    return result
 
 
 # ========== 用户端API ==========
@@ -120,7 +157,7 @@ async def analyze(
 
 免费报告已生成
 
-如需更详细的分析或有贷款需求，欢迎联系我们：
+如需更详细的分析或建议，欢迎联系我们：
 
 📱1599052952（同微信）
 
