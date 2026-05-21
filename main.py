@@ -1,5 +1,5 @@
 # main.py
-# 征信报告分析系统 - 主入口（完全免费版 + 功能说明）
+# 征信报告分析系统 - 主入口（紧凑版）
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,113 +30,73 @@ async def frontend():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>征信报告分析系统</title>
+    <title>简报 - 征信分析</title>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
         body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f5f7fa;padding:16px}
-        .container{max-width:600px;margin:0 auto;background:#fff;border-radius:24px;padding:20px;box-shadow:0 4px 20px rgba(0,0,0,0.08)}
-        h1{color:#1e3c72;border-bottom:3px solid #4a90e2;padding-bottom:12px;margin-bottom:16px;font-size:22px}
+        .container{max-width:600px;margin:0 auto;background:#fff;border-radius:20px;padding:16px;box-shadow:0 2px 12px rgba(0,0,0,0.06)}
         
-        /* 功能说明区域样式 */
-        .feature-card{background:linear-gradient(135deg,#e8f4fd 0%,#d4eaf7 100%);border-radius:20px;padding:20px;margin-bottom:20px}
-        .feature-title{font-size:18px;font-weight:bold;color:#1e3c72;margin-bottom:16px;padding-bottom:8px;border-bottom:2px solid #4a90e2}
-        .feature-grid{display:flex;flex-wrap:wrap;gap:20px}
-        .feature-col{flex:1;min-width:250px}
-        .feature-item{display:flex;gap:12px;margin-bottom:16px;font-size:13px;line-height:1.5}
-        .feature-icon{font-size:24px;min-width:36px;text-align:center}
-        .feature-content strong{color:#1e3c72;font-size:14px}
-        .feature-note{color:#666;font-size:12px}
-        .feature-warning{color:#e67e22;font-size:12px}
+        /* 标题区 */
+        h1{color:#1e3c72;border-bottom:2px solid #4a90e2;padding-bottom:8px;margin-bottom:4px;font-size:20px}
+        .slogan{font-size:12px;color:#e67e22;text-align:center;margin-bottom:16px;padding:6px 0}
         
-        .upload-area{border:2px dashed #4a90e2;border-radius:20px;padding:40px 20px;text-align:center;cursor:pointer;margin:16px 0;transition:all 0.3s}
+        /* 介绍区域 */
+        .intro-card{background:#f8f9fa;border-radius:12px;padding:12px;margin-bottom:16px}
+        .intro-title{font-size:12px;font-weight:bold;color:#1e3c72;margin-bottom:8px}
+        .intro-row{display:flex;flex-wrap:wrap;justify-content:space-between;margin-bottom:6px}
+        .intro-item{font-size:11px;color:#555;margin-bottom:4px}
+        .intro-item .label{font-weight:500;color:#1e3c72}
+        .divider{border-top:1px solid #e0e0e0;margin:8px 0}
+        
+        /* 上传区 */
+        .upload-area{border:2px dashed #4a90e2;border-radius:16px;padding:28px 16px;text-align:center;cursor:pointer;margin:12px 0;transition:all 0.2s}
         .upload-area:hover{background:#eef4ff;border-color:#357abd}
-        .upload-icon{font-size:48px;margin-bottom:12px}
-        .upload-text{font-size:14px;color:#666}
+        .upload-icon{font-size:40px;margin-bottom:8px}
+        .upload-text{font-size:13px;color:#666}
         .blue-text{color:#4a90e2}
-        .file-name{color:#2e7d32;font-size:14px;margin-top:8px}
-        .progress-container{display:none;margin-top:16px}
-        .progress-bar{background:#e0e0e0;border-radius:20px;height:8px;overflow:hidden}
+        .file-name{color:#2e7d32;font-size:12px;margin-top:6px}
+        
+        /* 进度条 */
+        .progress-container{display:none;margin-top:12px}
+        .progress-bar{background:#e0e0e0;border-radius:20px;height:6px;overflow:hidden}
         .progress-fill{background:#4a90e2;width:0%;height:100%;transition:width 0.3s}
-        .progress-text{text-align:center;font-size:12px;color:#666;margin-top:8px}
-        button{background:#4a90e2;color:#fff;border:none;padding:14px 28px;border-radius:40px;font-size:16px;font-weight:500;cursor:pointer;width:100%;margin-top:8px}
+        .progress-text{text-align:center;font-size:11px;color:#666;margin-top:6px}
+        
+        /* 按钮 */
+        button{background:#4a90e2;color:#fff;border:none;padding:12px 20px;border-radius:40px;font-size:15px;font-weight:500;cursor:pointer;width:100%;margin:8px 0}
         button:hover{background:#357abd}
-        button:disabled{background:#ccc;cursor:not-allowed}
-        .loading{display:none;text-align:center;margin:24px 0;color:#4a90e2}
-        .result-container{display:none;margin-top:24px}
-        .result-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
-        .result-header button{padding:8px 16px;width:auto;margin:0;background:#17a2b8}
+        button:disabled{background:#ccc}
+        
+        .loading{display:none;text-align:center;margin:16px 0;color:#4a90e2;font-size:13px}
+        .result-container{display:none;margin-top:16px}
+        .result-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+        .result-header button{padding:6px 14px;width:auto;margin:0;background:#17a2b8;font-size:12px}
         .result-header button:hover{background:#138496}
-        .result{background:#f9f9f9;border-radius:16px;padding:16px;font-family:monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;max-height:500px;overflow:auto;border:1px solid #e0e0e0}
-        .info-note{background:#e8f4fd;padding:12px;border-radius:12px;margin-top:20px;font-size:12px;text-align:center}
-        .copy-success{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#28a745;color:#fff;padding:10px 20px;border-radius:40px;font-size:14px;z-index:1000;display:none}
+        .result{background:#f9f9f9;border-radius:12px;padding:14px;font-family:monospace;font-size:11px;line-height:1.5;white-space:pre-wrap;max-height:450px;overflow:auto;border:1px solid #e0e0e0}
+        
+        .bottom-note{background:#e8f4fd;padding:10px;border-radius:12px;margin-top:16px;font-size:11px;text-align:center;color:#1e3c72}
+        .copy-success{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#28a745;color:#fff;padding:8px 16px;border-radius:40px;font-size:12px;z-index:1000;display:none}
     </style>
 </head>
 <body>
 <div class="container">
-    <h1>📄 征信结构解读</h1>
+    <h1>📄 简报</h1>
+    <div class="slogan">💡 替您省下“没必要请的假、没必要花的钱、没必要浪费的时间”</div>
     
-    <!-- 功能说明区域 -->
-    <div class="feature-card">
-        <div class="feature-title">🔍 简版报告智能分析</div>
-        <div class="feature-grid">
-            <div class="feature-col">
-                <div class="feature-item">
-                    <div class="feature-icon">📊</div>
-                    <div class="feature-content">
-                        <strong>贷款分类</strong><br>
-                        房贷：X家，X万元<br>
-                        车贷：X家，X万元<br>
-                        网贷：X家，X万元<br>
-                        <span class="feature-note">识别来源：微众、网商、借呗等</span>
-                    </div>
-                </div>
-                <div class="feature-item">
-                    <div class="feature-icon">💰</div>
-                    <div class="feature-content">
-                        <strong>金额统计</strong><br>
-                        总贷款金额：X万元
-                    </div>
-                </div>
-                <div class="feature-item">
-                    <div class="feature-icon">💳</div>
-                    <div class="feature-content">
-                        <strong>信用卡分析</strong><br>
-                        使用率：X%<br>
-                        <span class="feature-warning">⚠️ 超70%银行会谨慎</span>
-                    </div>
-                </div>
-                <div class="feature-item">
-                    <div class="feature-icon">📅</div>
-                    <div class="feature-content">
-                        <strong>查询统计</strong><br>
-                        近1个月：X次<br>
-                        近3个月：X次<br>
-                        近6个月：X次<br>
-                        其中网贷查询：X次
-                    </div>
-                </div>
-            </div>
-            <div class="feature-col">
-                <div class="feature-item">
-                    <div class="feature-icon">🧠</div>
-                    <div class="feature-content">
-                        <strong>AI 智能评估</strong><br>
-                        • 综合评估：可正常申请<br>
-                        • 需优化：网贷家数过多<br>
-                        • 风险提示：使用率过高<br>
-                        • 查询提醒：近3个月查询X次
-                    </div>
-                </div>
-                <div class="feature-item">
-                    <div class="feature-icon">💡</div>
-                    <div class="feature-content">
-                        <strong>优化建议</strong><br>
-                        • 先结清：借呗、微粒贷<br>
-                        • 建议停查：3-6个月<br>
-                        • 信用卡使用率降至70%以下
-                    </div>
-                </div>
-            </div>
+    <div class="intro-card">
+        <div class="intro-title">📌 介绍</div>
+        <div class="intro-row">
+            <span class="intro-item">✅ 逾期少→简版+简报够用</span>
+            <span class="intro-item">⚠️ 逾期多→详版必要，简报做初筛</span>
+        </div>
+        <div class="divider"></div>
+        <div class="intro-row">
+            <span class="intro-item"><span class="label">📊 贷款分类</span> 房贷·车贷·网贷</span>
+            <span class="intro-item"><span class="label">💳 信用卡</span> 使用率:X%</span>
+        </div>
+        <div class="intro-row">
+            <span class="intro-item"><span class="label">📅 查询统计</span> 阶段·分类展示</span>
+            <span class="intro-item"><span class="label">🧠 AI评估+优化建议</span> 评分·风险·结清·停查</span>
         </div>
     </div>
     
@@ -157,13 +117,14 @@ async def frontend():
     <div class="loading" id="loading">正在为您分析，请稍候...</div>
     <div class="result-container" id="resultContainer">
         <div class="result-header">
-            <span style="font-size:14px;font-weight:500;">📋 分析结果</span>
-            <button id="copyBtn" style="display:none;background:#17a2b8;width:auto;padding:8px 16px;">📋 复制报告</button>
+            <span>📋 分析结果</span>
+            <button id="copyBtn" style="display:none">📋 复制报告</button>
         </div>
         <div class="result" id="result"></div>
     </div>
-    <div class="info-note">
-        有问题联系我：📱1599052952（同微信）
+    
+    <div class="bottom-note">
+        📱 有问题联系我：1599052952（同微信）
     </div>
 </div>
 <div id="copySuccess" class="copy-success">✅ 已复制到剪贴板</div>
@@ -242,7 +203,6 @@ async def frontend():
         }
     });
     
-    // 进度条模拟
     let progressInterval = null;
     function startProgress(steps) {
         steps = steps || ['上传中...', '解析PDF中...', '生成报告中...'];
@@ -261,7 +221,7 @@ async def frontend():
         if (progressInterval) clearInterval(progressInterval);
         progressFill.style.width = '100%';
         progressText.textContent = '完成！';
-        setTimeout(function() { progressContainer.style.display = 'none'; }, 1000);
+        setTimeout(function() { progressContainer.style.display = 'none'; }, 800);
     }
     function resetProgress() { 
         if (progressInterval) clearInterval(progressInterval); 
