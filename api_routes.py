@@ -58,31 +58,17 @@ def format_report_sections(text: str) -> str:
 @router.post("/api/analyze")
 async def analyze(
     request: Request,
-    file: UploadFile, 
-    phone: str = Header(None), 
-    api_key: str = Header(None)
+    file: UploadFile
 ):
-    """分析接口 - 完全免费版"""
+    """分析接口 - 完全免费版，无需登录"""
     
-    # 频率限制
-    if phone and not auth.rate_limit(phone, limit=10, window=60):
-        remaining = auth.get_rate_limit_remaining(phone, limit=10, window=60)
+    # 频率限制（使用IP或匿名标识）
+    client_ip = request.client.host if request.client else "unknown"
+    if not auth.rate_limit(client_ip, limit=10, window=60):
+        remaining = auth.get_rate_limit_remaining(client_ip, limit=10, window=60)
         return JSONResponse(
             status_code=429,
             content={"code": "RATE_LIMIT", "message": f"请求过于频繁，请稍后再试。剩余可用次数: {remaining}/分钟"}
-        )
-    
-    if database.users_collection is None:
-        return JSONResponse(
-            status_code=500,
-            content={"code": "DB_ERROR", "message": "数据库未连接，请稍后重试"}
-        )
-    
-    # 验证手机号和API Key是否提供
-    if not phone or not api_key:
-        return JSONResponse(
-            status_code=401,
-            content={"code": "MISSING_CREDENTIAL", "message": "请填写手机号和API Key。新用户请联系管理员获取API Key"}
         )
     
     # 验证文件
@@ -109,15 +95,6 @@ async def analyze(
                 content={"code": "DETAILED_REPORT", "message": "此为详版报告，请上传简版"}
             )
         
-        # 验证用户是否存在
-        exists, user, _ = database.verify_user_exists(phone, api_key)
-        
-        if not exists:
-            return JSONResponse(
-                status_code=401,
-                content={"code": "INVALID_CREDENTIAL", "message": "手机号或API Key错误，请核对后重试。新用户请联系管理员获取API Key"}
-            )
-        
         # 生成分析报告
         stats, lines = credit_analysis.generate_report(md)
         raw_response = credit_analysis.call_deepseek(credit_analysis.build_llm_prompt(stats))
@@ -131,21 +108,25 @@ async def analyze(
             if database.db is not None:
                 raw_collection = database.db["raw_reports"]
                 raw_collection.insert_one({
-                    "phone": phone,
+                    "phone": "anonymous",
                     "raw_text": md,
                     "created_at": datetime.now()
                 })
         except Exception as e:
             print(f"保存原始数据失败: {e}")
         
-        # 返回完整报告（免费版，不扣费）
-        final_report = f"""让您久等了，您的专属征信解读报告已生成，请查阅~
+        # 返回完整报告（免费版）
+        final_report = f"""━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🔑 **您的API Key**: {api_key}
+免费报告已生成
 
-{report_content}
+如需更详细的分析或有贷款需求，欢迎联系我们：
 
-📱 遇到问题请联系管理员（微信:DXNBZ579）"""
+📱1599052952（同微信）
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{report_content}"""
         
         return JSONResponse({"success": True, "full_report": final_report})
         
@@ -157,13 +138,6 @@ async def analyze(
             status_code=500,
             content={"code": "SERVER_ERROR", "message": f"处理失败: {str(e)}"}
         )
-
-
-@router.get("/api/verify")
-async def verify(phone: str, api_key: str):
-    """验证用户凭证"""
-    exists, user, _ = database.verify_user_exists(phone, api_key)
-    return {"valid": exists}
 
 
 @router.get("/api/health")

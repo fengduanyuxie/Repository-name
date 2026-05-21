@@ -1,5 +1,5 @@
 # main.py
-# 征信报告分析系统 - 主入口（完全免费版）
+# 征信报告分析系统 - 主入口（完全免费版 + 功能说明）
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,17 +36,28 @@ async def frontend():
         body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f5f7fa;padding:16px}
         .container{max-width:600px;margin:0 auto;background:#fff;border-radius:24px;padding:20px;box-shadow:0 4px 20px rgba(0,0,0,0.08)}
         h1{color:#1e3c72;border-bottom:3px solid #4a90e2;padding-bottom:12px;margin-bottom:16px;font-size:22px}
-        .desc{color:#666;font-size:14px;margin-bottom:20px;line-height:1.6}
-        .desc strong{color:#1e3c72;font-weight:700}
-        .auth-box{background:#f0f2f5;border-radius:12px;padding:16px;margin-bottom:20px}
-        .auth-box input{width:100%;padding:10px;margin-bottom:10px;border:1px solid #ddd;border-radius:8px;font-size:14px}
-        .remember-row{display:flex;justify-content:space-between;align-items:center;margin-top:8px}
-        .remember-row label{display:flex;align-items:center;gap:6px;font-size:12px;color:#666;cursor:pointer}
-        .clear-btn{background:none;border:none;color:#dc3545;font-size:12px;cursor:pointer}
+        
+        /* 功能说明区域样式 */
+        .feature-card{background:linear-gradient(135deg,#e8f4fd 0%,#d4eaf7 100%);border-radius:20px;padding:20px;margin-bottom:20px}
+        .feature-title{font-size:18px;font-weight:bold;color:#1e3c72;margin-bottom:16px;padding-bottom:8px;border-bottom:2px solid #4a90e2}
+        .feature-grid{display:flex;flex-wrap:wrap;gap:20px}
+        .feature-col{flex:1;min-width:250px}
+        .feature-item{display:flex;gap:12px;margin-bottom:16px;font-size:13px;line-height:1.5}
+        .feature-icon{font-size:24px;min-width:36px;text-align:center}
+        .feature-content strong{color:#1e3c72;font-size:14px}
+        .feature-note{color:#666;font-size:12px}
+        .feature-warning{color:#e67e22;font-size:12px}
+        
         .upload-area{border:2px dashed #4a90e2;border-radius:20px;padding:40px 20px;text-align:center;cursor:pointer;margin:16px 0;transition:all 0.3s}
         .upload-area:hover{background:#eef4ff;border-color:#357abd}
         .upload-icon{font-size:48px;margin-bottom:12px}
+        .upload-text{font-size:14px;color:#666}
+        .blue-text{color:#4a90e2}
         .file-name{color:#2e7d32;font-size:14px;margin-top:8px}
+        .progress-container{display:none;margin-top:16px}
+        .progress-bar{background:#e0e0e0;border-radius:20px;height:8px;overflow:hidden}
+        .progress-fill{background:#4a90e2;width:0%;height:100%;transition:width 0.3s}
+        .progress-text{text-align:center;font-size:12px;color:#666;margin-top:8px}
         button{background:#4a90e2;color:#fff;border:none;padding:14px 28px;border-radius:40px;font-size:16px;font-weight:500;cursor:pointer;width:100%;margin-top:8px}
         button:hover{background:#357abd}
         button:disabled{background:#ccc;cursor:not-allowed}
@@ -56,29 +67,82 @@ async def frontend():
         .result-header button{padding:8px 16px;width:auto;margin:0;background:#17a2b8}
         .result-header button:hover{background:#138496}
         .result{background:#f9f9f9;border-radius:16px;padding:16px;font-family:monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;max-height:500px;overflow:auto;border:1px solid #e0e0e0}
-        .info-note{background:#e8f4fd;padding:12px;border-radius:12px;margin-top:20px;font-size:12px;color:#4a90e2;text-align:center}
+        .info-note{background:#e8f4fd;padding:12px;border-radius:12px;margin-top:20px;font-size:12px;text-align:center}
         .copy-success{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#28a745;color:#fff;padding:10px 20px;border-radius:40px;font-size:14px;z-index:1000;display:none}
     </style>
 </head>
 <body>
 <div class="container">
     <h1>📄 征信结构解读</h1>
-    <p class="desc">请上传个人<strong>简版</strong>信用报告（PDF），免费分析</p>
     
-    <div class="auth-box">
-        <input type="tel" id="phone" placeholder="手机号" autocomplete="off">
-        <input type="text" id="apiKey" placeholder="API Key" autocomplete="off">
-        <div class="remember-row">
-            <label>
-                <input type="checkbox" id="rememberMe"> 记住我
-            </label>
-            <button id="clearRememberBtn" class="clear-btn">清除记录</button>
+    <!-- 功能说明区域 -->
+    <div class="feature-card">
+        <div class="feature-title">🔍 简版报告智能分析</div>
+        <div class="feature-grid">
+            <div class="feature-col">
+                <div class="feature-item">
+                    <div class="feature-icon">📊</div>
+                    <div class="feature-content">
+                        <strong>贷款分类</strong><br>
+                        房贷：X家，X万元<br>
+                        车贷：X家，X万元<br>
+                        网贷：X家，X万元<br>
+                        <span class="feature-note">识别来源：微众、网商、借呗等</span>
+                    </div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">💰</div>
+                    <div class="feature-content">
+                        <strong>金额统计</strong><br>
+                        总贷款金额：X万元
+                    </div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">💳</div>
+                    <div class="feature-content">
+                        <strong>信用卡分析</strong><br>
+                        使用率：X%<br>
+                        <span class="feature-warning">⚠️ 超70%银行会谨慎</span>
+                    </div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">📅</div>
+                    <div class="feature-content">
+                        <strong>查询统计</strong><br>
+                        近1个月：X次<br>
+                        近3个月：X次<br>
+                        近6个月：X次<br>
+                        其中网贷查询：X次
+                    </div>
+                </div>
+            </div>
+            <div class="feature-col">
+                <div class="feature-item">
+                    <div class="feature-icon">🧠</div>
+                    <div class="feature-content">
+                        <strong>AI 智能评估</strong><br>
+                        • 综合评估：可正常申请<br>
+                        • 需优化：网贷家数过多<br>
+                        • 风险提示：使用率过高<br>
+                        • 查询提醒：近3个月查询X次
+                    </div>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">💡</div>
+                    <div class="feature-content">
+                        <strong>优化建议</strong><br>
+                        • 先结清：借呗、微粒贷<br>
+                        • 建议停查：3-6个月<br>
+                        • 信用卡使用率降至70%以下
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
     
     <div class="upload-area" id="uploadArea">
         <div class="upload-icon">📎</div>
-        <div class="upload-text">点击或拖拽上传PDF文件</div>
+        <div class="upload-text">点击或拖拽上传<span class="blue-text"><strong>简版</strong></span>信用报告（PDF）</div>
         <div class="file-name" id="fileName"></div>
         <input type="file" id="fileInput" accept=".pdf" style="display:none">
     </div>
@@ -88,7 +152,7 @@ async def frontend():
         <div class="progress-text" id="progressText">准备上传...</div>
     </div>
     
-    <button id="analyzeBtn" disabled>开始分析</button>
+    <button id="analyzeBtn">开始分析</button>
     
     <div class="loading" id="loading">正在为您分析，请稍候...</div>
     <div class="result-container" id="resultContainer">
@@ -99,7 +163,7 @@ async def frontend():
         <div class="result" id="result"></div>
     </div>
     <div class="info-note">
-        📱 遇到问题请联系管理员（微信:DXNBZ579）
+        有问题联系我：📱1599052952（同微信）
     </div>
 </div>
 <div id="copySuccess" class="copy-success">✅ 已复制到剪贴板</div>
@@ -112,25 +176,14 @@ async def frontend():
     const resultDiv = document.getElementById('result');
     const resultContainer = document.getElementById('resultContainer');
     const fileNameSpan = document.getElementById('fileName');
-    const phoneInput = document.getElementById('phone');
-    const apiKeyInput = document.getElementById('apiKey');
     const copyBtn = document.getElementById('copyBtn');
     const copySuccess = document.getElementById('copySuccess');
-    const rememberCheckbox = document.getElementById('rememberMe');
-    const clearRememberBtn = document.getElementById('clearRememberBtn');
     const progressContainer = document.getElementById('progressContainer');
     const progressFill = document.getElementById('progressFill');
     const progressText = document.getElementById('progressText');
     
     let selectedFile = null;
     let currentReport = '';
-    
-    function checkAuth() {
-        analyzeBtn.disabled = !(selectedFile && phoneInput.value.trim() && apiKeyInput.value.trim());
-    }
-    
-    phoneInput.addEventListener('input', checkAuth);
-    apiKeyInput.addEventListener('input', checkAuth);
     
     function handleFile(file) {
         if (!file || file.type !== 'application/pdf') {
@@ -147,12 +200,13 @@ async def frontend():
     
     function reset() {
         document.querySelector('.upload-icon').innerHTML = '📎';
-        document.querySelector('.upload-text').innerHTML = '点击或拖拽上传PDF文件';
+        document.querySelector('.upload-text').innerHTML = '点击或拖拽上传<span class="blue-text"><strong>简版</strong></span>信用报告（PDF）';
         fileNameSpan.innerHTML = '';
         selectedFile = null;
-        analyzeBtn.disabled = true;
+        analyzeBtn.disabled = false;
         currentReport = '';
         copyBtn.style.display = 'none';
+        resetProgress();
     }
     
     function copyReport() {
@@ -188,20 +242,41 @@ async def frontend():
         }
     });
     
+    // 进度条模拟
+    let progressInterval = null;
+    function startProgress(steps) {
+        steps = steps || ['上传中...', '解析PDF中...', '生成报告中...'];
+        progressContainer.style.display = 'block';
+        let percent = 0;
+        progressInterval = setInterval(function() {
+            if (percent >= 90) { clearInterval(progressInterval); return; }
+            percent = percent + Math.random() * 15;
+            if (percent > 90) percent = 90;
+            progressFill.style.width = percent + '%';
+            var stepIndex = Math.floor(percent / 30);
+            progressText.textContent = steps[Math.min(stepIndex, steps.length - 1)] || '处理中...';
+        }, 500);
+    }
+    function completeProgress() {
+        if (progressInterval) clearInterval(progressInterval);
+        progressFill.style.width = '100%';
+        progressText.textContent = '完成！';
+        setTimeout(function() { progressContainer.style.display = 'none'; }, 1000);
+    }
+    function resetProgress() { 
+        if (progressInterval) clearInterval(progressInterval); 
+        progressContainer.style.display = 'none'; 
+        progressFill.style.width = '0%'; 
+    }
+    
     analyzeBtn.addEventListener('click', async () => {
         if (!selectedFile) return;
-        
-        const phone = phoneInput.value.trim();
-        const apiKey = apiKeyInput.value.trim();
-        if (!phone || !apiKey) {
-            alert('请填写手机号和API Key');
-            return;
-        }
         
         analyzeBtn.disabled = true;
         loadingDiv.style.display = 'block';
         resultContainer.style.display = 'none';
         copyBtn.style.display = 'none';
+        startProgress();
         
         const formData = new FormData();
         formData.append('file', selectedFile);
@@ -209,24 +284,35 @@ async def frontend():
         try {
             const resp = await fetch('/api/analyze', {
                 method: 'POST',
-                headers: {
-                    'phone': phone,
-                    'api-key': apiKey
-                },
                 body: formData
             });
             const data = await resp.json();
-            if (!resp.ok) throw new Error(data.detail || '分析失败');
+            completeProgress();
+            
+            if (!resp.ok) {
+                if (data.code === 'NOT_SIMPLE_REPORT') {
+                    alert('请上传正确的简版征信报告');
+                } else if (data.code === 'DETAILED_REPORT') {
+                    alert('此为详版报告，请上传简版');
+                } else {
+                    alert(data.message || '分析失败，请重试');
+                }
+                return;
+            }
+            
             currentReport = data.full_report;
             resultDiv.innerText = currentReport;
             resultContainer.style.display = 'block';
             copyBtn.style.display = 'inline-block';
             resultContainer.scrollIntoView({ behavior: 'smooth' });
+            
         } catch (err) {
-            alert('抱歉，出错了：' + err.message);
+            completeProgress();
+            alert('网络错误，请稍后重试');
         } finally {
             loadingDiv.style.display = 'none';
             analyzeBtn.disabled = false;
+            resetProgress();
         }
     });
 </script>
