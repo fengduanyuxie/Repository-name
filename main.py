@@ -134,7 +134,7 @@ async def frontend():
     </div>
     
     <div class="bottom-note">
-        📱 有问题联系我：1599052952（同微信）
+        有建议欢迎联系：📱1599052952（同微信）
     </div>
 </div>
 <div id="copySuccess" class="copy-success">✅ 已复制到剪贴板</div>
