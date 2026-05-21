@@ -1,5 +1,5 @@
 # admin_routes.py
-# 管理后台路由（含日志、统计图表、数据导出）
+# 管理后台路由（完全免费版 - 无充值功能）
 
 from fastapi import APIRouter, HTTPException, Depends, Form, Query
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -23,7 +23,7 @@ async def admin_page():
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>管理后台</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
         body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f0f2f5;padding:20px}
@@ -41,24 +41,10 @@ async def admin_page():
         .result{margin-top:16px;padding:12px;border-radius:8px;display:none}
         .result.success{background:#e8f8f0;border:1px solid #2e7d32;display:block}
         .result.error{background:#ffebee;border:1px solid #c62828;display:block}
-<<<<<<< HEAD
         table{width:100%;border-collapse:collapse;margin-top:16px}
         th,td{padding:12px;text-align:left;border-bottom:1px solid #eee;vertical-align:top}
         th{background:#f5f5f5;font-weight:600}
         .actions button{padding:4px 12px;margin:0 4px;font-size:12px}
-=======
-        table{width:100%;border-collapse:collapse;margin-top:16px;table-layout:fixed}
-        th,td{padding:12px;text-align:left;border-bottom:1px solid #eee;vertical-align:middle;word-break:break-all;white-space:normal}
-        th{background:#f5f5f5;font-weight:600}
-        th:nth-child(1),td:nth-child(1){width:12%}
-        th:nth-child(2),td:nth-child(2){width:28%}
-        th:nth-child(3),td:nth-child(3){width:8%;text-align:center}
-        th:nth-child(4),td:nth-child(4){width:15%}
-        th:nth-child(5),td:nth-child(5){width:15%}
-        th:nth-child(6),td:nth-child(6){width:12%}
-        th:nth-child(7),td:nth-child(7){width:10%}
-        td:nth-child(3){text-align:center}
->>>>>>> 24e32a1fe056b55953b2483775e1514832413729
         .danger{background:#dc3545}
         .danger:hover{background:#c82333}
         .logout-btn{float:right;background:#6c757d}
@@ -83,8 +69,6 @@ async def admin_page():
         .export-box .form-group{flex:1;min-width:180px}
         .export-box button{margin:0}
         .date-input{width:100%}
-        .copy-key-btn{margin-left:8px;padding:2px 8px;font-size:12px;background:#28a745}
-        .copy-key-btn:hover{background:#218838}
     </style>
 </head>
 <body>
@@ -123,12 +107,6 @@ function logout() { localStorage.removeItem(tokenKey); showLoginPage(); }
 
 async function showAdminPanel() {
     const token = localStorage.getItem(tokenKey);
-    // 验证 token 有效性
-    try {
-        const testResp = await fetch('/admin/users', { headers: {'Authorization': `Bearer ${token}`} });
-        if (testResp.status === 401) { logout(); return; }
-    } catch(e) { logout(); return; }
-    
     document.getElementById('app').innerHTML = `
         <div class="container">
             <div class="card">
@@ -140,11 +118,10 @@ async function showAdminPanel() {
                     <button class="tab" onclick="showTab('export')">📥 数据导出</button>
                 </div>
                 <div id="tab-users" class="tab-content active">
-                    <h2>➕ 添加/充值用户</h2>
+                    <h2>➕ 添加用户</h2>
                     <div class="form-group"><label>手机号</label><input type="tel" id="phone" placeholder="13812345678"></div>
-                    <div class="form-group"><label>充值次数</label><input type="number" id="balance" value="10"></div>
                     <div class="form-group"><label>有效期（天）</label><input type="number" id="days" value="62"><small style="color:#999">0表示永久有效</small></div>
-                    <button onclick="addUser()">生成/充值</button>
+                    <button onclick="addUser()">添加用户</button>
                     <div id="addResult" class="result"></div>
                     
                     <h2 style="margin-top:30px">📋 用户列表</h2>
@@ -196,11 +173,9 @@ async function showAdminPanel() {
                 </div>
             </div>
         </div>`;
-    setTimeout(() => {
-        loadUsers();
-        loadStats();
-        loadLogs();
-    }, 100);
+    loadUsers();
+    loadStats();
+    loadLogs();
 }
 
 function showTab(tabName) {
@@ -212,18 +187,6 @@ function showTab(tabName) {
 
 let allUsers = [];
 let statsChart = null;
-
-function copyNewApiKey() {
-    const apiKeyElement = document.getElementById('newApiKey');
-    if (apiKeyElement) {
-        const apiKey = apiKeyElement.innerText;
-        navigator.clipboard.writeText(apiKey).then(function() {
-            alert('✅ API Key已复制到剪贴板');
-        }).catch(function() {
-            alert('❌ 复制失败，请手动复制');
-        });
-    }
-}
 
 async function loadUsers() {
     const token = localStorage.getItem(tokenKey);
@@ -246,25 +209,15 @@ function renderUserList(users) {
         tableDiv.innerHTML = '<div style="padding:20px;text-align:center;color:#666;">暂无用户</div>'; 
         return; 
     }
-<<<<<<< HEAD
     let html = '<table style="width:100%;border-collapse:collapse;">';
     html += '<thead>' +
             '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">手机号</th>' +
             '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">API Key</th>' +
-            '<th style="padding:12px;text-align:center;border-bottom:1px solid #eee;background:#f5f5f5;">剩余次数</th>' +
             '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">有效期</th>' +
-            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">创建时间</th>' +
-            '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">最后使用</th>' +
             '<th style="padding:12px;text-align:left;border-bottom:1px solid #eee;background:#f5f5f5;">操作</th>' +
-=======
-    let html = '<table>';
-    html += '<thead><tr>' +
-            '<th>手机号</th><th>API Key</th><th>剩余次数</th><th>有效期</th><th>创建时间</th><th>最后使用</th><th>操作</th>' +
->>>>>>> 24e32a1fe056b55953b2483775e1514832413729
             '</tr></thead><tbody>';
     for (const u of users) {
         const created = u.created_at ? new Date(u.created_at).toLocaleString('zh-CN') : '-';
-        const lastUsed = u.last_used_at ? new Date(u.last_used_at).toLocaleString('zh-CN') : '未使用';
         const expireAt = u.expire_at ? new Date(u.expire_at).toLocaleString('zh-CN') : '永久';
         const escapedPhone = (u.phone || '').replace(/[&<>]/g, function(m) {
             if (m === '&') return '&amp;';
@@ -273,27 +226,11 @@ function renderUserList(users) {
             return m;
         });
         html += `<tr>
-<<<<<<< HEAD
             <td style="padding:12px;border-bottom:1px solid #eee;">${escapedPhone}</td>
-            <td style="padding:12px;border-bottom:1px solid #eee;font-family:monospace;font-size:12px;word-break:break-all;max-width:300px;">${u.api_key || ''}</td>
-            <td style="padding:12px;border-bottom:1px solid #eee;text-align:center;font-weight:bold;">${u.balance || 0}</td>
+            <td style="padding:12px;border-bottom:1px solid #eee;font-family:monospace;font-size:12px;word-break:break-all;">${u.api_key || ''}</td>
             <td style="padding:12px;border-bottom:1px solid #eee;">${expireAt}</td>
-            <td style="padding:12px;border-bottom:1px solid #eee;">${created}</td>
-            <td style="padding:12px;border-bottom:1px solid #eee;">${lastUsed}</td>
             <td style="padding:12px;border-bottom:1px solid #eee;">
-                <button onclick="recharge('${escapedPhone}')" style="padding:4px 12px;margin:0 4px;background:#4a90e2;color:#fff;border:none;border-radius:6px;cursor:pointer;">充值</button>
-                <button onclick="del('${escapedPhone}')" style="padding:4px 12px;margin:0 4px;background:#dc3545;color:#fff;border:none;border-radius:6px;cursor:pointer;">删除</button>
-=======
-            <td>${escapedPhone}</td>
-            <td style="word-break:break-all;white-space:normal;">${u.api_key || ''}</td>
-            <td style="text-align:center;">${u.balance || 0}</td>
-            <td>${expireAt}</td>
-            <td>${created}</td>
-            <td>${lastUsed}</td>
-            <td>
-                <button onclick="recharge('${escapedPhone}')">充值</button>
-                <button onclick="del('${escapedPhone}')" style="background:#dc3545">删除</button>
->>>>>>> 24e32a1fe056b55953b2483775e1514832413729
+                <button onclick="del('${escapedPhone}')" style="background:#dc3545;padding:4px 12px;margin:0 4px;border:none;border-radius:4px;color:#fff;cursor:pointer;">删除</button>
             </td>
         </tr>`;
     }
@@ -316,7 +253,6 @@ function clearSearch() {
 async function addUser() {
     const token = localStorage.getItem(tokenKey);
     const phone = document.getElementById('phone').value;
-    const balance = document.getElementById('balance').value;
     const days = document.getElementById('days').value;
     const resDiv = document.getElementById('addResult');
     if (!phone) { resDiv.className='result error'; resDiv.innerHTML='❌ 请填写手机号'; return; }
@@ -324,38 +260,18 @@ async function addUser() {
         const resp = await fetch('/admin/add_user', { 
             method:'POST', 
             headers:{'Content-Type':'application/x-www-form-urlencoded','Authorization':`Bearer ${token}`}, 
-            body:new URLSearchParams({phone, balance, days}) 
+            body:new URLSearchParams({phone, days}) 
         });
         const data = await resp.json();
         if (resp.ok) {
             resDiv.className='result success';
-            resDiv.innerHTML = `✅ 成功！<br>手机号: ${data.phone}<br>API Key: <strong style="font-family:monospace;word-break:break-all;" id="newApiKey">${data.api_key}</strong><button class="copy-key-btn" onclick="copyNewApiKey()">📋 复制</button><br>剩余次数: ${data.balance}`;
+            resDiv.innerHTML = `✅ 成功！<br>手机号: ${data.phone}<br>API Key: <strong style="font-family:monospace;word-break:break-all;">${data.api_key}</strong>`;
             document.getElementById('phone').value = '';
             loadUsers();
             loadStats();
             loadLogs();
         } else { if (resp.status===401) logout(); resDiv.className='result error'; resDiv.innerHTML=`❌ ${data.detail}`; }
     } catch(e) { resDiv.className='result error'; resDiv.innerHTML=`错误: ${e.message}`; }
-}
-
-async function recharge(phone) {
-    const token = localStorage.getItem(tokenKey);
-    const amount = prompt(`为 ${phone} 充值次数:`, '10');
-    if (!amount) return;
-    try {
-        const resp = await fetch('/admin/recharge', { 
-            method:'POST', 
-            headers:{'Content-Type':'application/x-www-form-urlencoded','Authorization':`Bearer ${token}`}, 
-            body:new URLSearchParams({phone, amount}) 
-        });
-        const data = await resp.json();
-        if (resp.ok) { 
-            alert(`✅ 充值成功！新余额: ${data.new_balance}`); 
-            loadUsers();
-            loadStats();
-            loadLogs();
-        } else { if (resp.status===401) logout(); alert(`❌ ${data.detail}`); }
-    } catch(e) { alert(`错误: ${e.message}`); }
 }
 
 async function del(phone) {
@@ -379,52 +295,34 @@ async function del(phone) {
 
 async function loadStats() {
     const token = localStorage.getItem(tokenKey);
-    if (!token) { logout(); return; }
     try {
-        const resp = await fetch('/admin/stats', { 
-            headers: {'Authorization': `Bearer ${token}`},
-            cache: 'no-cache'
-        });
+        const resp = await fetch('/admin/stats', { headers: {'Authorization': `Bearer ${token}`} });
         if (resp.status === 401) { logout(); return; }
-        if (!resp.ok) throw new Error('加载失败');
         const data = await resp.json();
         
         const statsGrid = document.getElementById('statsGrid');
-        if (statsGrid) {
-            statsGrid.innerHTML = `
-                <div class="stat-card"><div class="stat-number">${data.userStats.total || 0}</div><div class="stat-label">总用户数</div></div>
-                <div class="stat-card"><div class="stat-number">${data.userStats.total_balance || 0}</div><div class="stat-label">总剩余次数</div></div>
-                <div class="stat-card"><div class="stat-number">${data.totalCalls || 0}</div><div class="stat-label">总调用次数</div></div>
-                <div class="stat-card"><div class="stat-number">${data.todayVisits || 0}</div><div class="stat-label">今日访问量</div></div>
-                <div class="stat-card"><div class="stat-number">${data.totalVisits || 0}</div><div class="stat-label">总访问量</div></div>
-            `;
-        }
+        statsGrid.innerHTML = `
+            <div class="stat-card"><div class="stat-number">${data.userStats.total}</div><div class="stat-label">总用户数</div></div>
+            <div class="stat-card"><div class="stat-number">${data.totalCalls}</div><div class="stat-label">总调用次数</div></div>
+        `;
         
-        const ctx = document.getElementById('statsChart');
         if (statsChart) statsChart.destroy();
-        if (ctx && typeof Chart !== 'undefined' && data.chartLabels && data.chartLabels.length > 0) {
-            statsChart = new Chart(ctx.getContext('2d'), {
-                type: 'line',
-                data: {
-                    labels: data.chartLabels,
-                    datasets: [{
-                        label: '每日调用次数',
-                        data: data.chartData,
-                        borderColor: '#4a90e2',
-                        backgroundColor: 'rgba(74,144,226,0.1)',
-                        fill: true
-                    }]
-                },
-                options: { responsive: true, maintainAspectRatio: true }
-            });
-        } else if (ctx) {
-            ctx.innerHTML = '<div style="padding:20px;text-align:center;color:#999;">暂无统计数据</div>';
-        }
-    } catch(e) { 
-        console.error('loadStats错误:', e);
-        const statsGrid = document.getElementById('statsGrid');
-        if (statsGrid) statsGrid.innerHTML = '<div class="result error">统计加载失败，请刷新重试</div>';
-    }
+        const ctx = document.getElementById('statsChart').getContext('2d');
+        statsChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: data.chartLabels,
+                datasets: [{
+                    label: '每日调用次数',
+                    data: data.chartData,
+                    borderColor: '#4a90e2',
+                    backgroundColor: 'rgba(74,144,226,0.1)',
+                    fill: true
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: true }
+        });
+    } catch(e) { console.error(e); }
 }
 
 async function loadLogs() {
@@ -444,11 +342,11 @@ async function loadLogs() {
         for (const log of data.logs) {
             const time = log.created_at ? new Date(log.created_at).toLocaleString('zh-CN') : '-';
             html += `<tr>
-                <td>${time}</td>
-                <td>${log.admin || '-'}</td>
-                <td>${log.action || '-'}</td>
-                <td>${log.target || '-'}</td>
-                <td>${log.details || '-'}</td>
+                <td style="padding:8px;">${time}</td>
+                <td style="padding:8px;">${log.admin || '-'}</td>
+                <td style="padding:8px;">${log.action || '-'}</td>
+                <td style="padding:8px;">${log.target || '-'}</td>
+                <td style="padding:8px;">${log.details || '-'}</td>
             </tr>`;
         }
         html += '</tbody></table>';
@@ -516,25 +414,12 @@ async def admin_login(password: str = Form(...)):
 
 
 @router.post("/admin/add_user")
-async def add_user(phone: str = Form(...), balance: int = Form(10), days: int = Form(62), _=Depends(auth.verify_admin_request)):
-    if not phone or balance <= 0:
+async def add_user(phone: str = Form(...), days: int = Form(62), _=Depends(auth.verify_admin_request)):
+    if not phone:
         raise HTTPException(400, detail="参数错误")
-    api_key, new_balance = database.add_or_recharge_user(phone, balance, days)
-    database.add_admin_log("admin", "add_user", phone, f"充值{balance}次，有效期{days}天")
-    return {"success": True, "phone": phone, "api_key": api_key, "balance": new_balance}
-
-
-@router.post("/admin/recharge")
-async def recharge_user(phone: str = Form(...), amount: int = Form(...), _=Depends(auth.verify_admin_request)):
-    if amount <= 0:
-        raise HTTPException(400, detail="充值次数必须大于0")
-    user = database.get_user_by_phone(phone)
-    if not user:
-        raise HTTPException(404, detail="用户不存在")
-    database.users_collection.update_one({"phone": phone}, {"$inc": {"balance": amount}})
-    new_user = database.get_user_by_phone(phone)
-    database.add_admin_log("admin", "recharge", phone, f"充值{amount}次")
-    return {"success": True, "phone": phone, "added": amount, "new_balance": new_user["balance"]}
+    api_key = database.add_user(phone, days)
+    database.add_admin_log("admin", "add_user", phone, f"添加用户，有效期{days}天")
+    return {"success": True, "phone": phone, "api_key": api_key}
 
 
 @router.post("/admin/delete_user")
@@ -557,14 +442,11 @@ async def get_stats(_=Depends(auth.verify_admin_request)):
     total_calls = sum(s.get("total_calls", 0) for s in usage_stats)
     chart_labels = [s.get("date", "") for s in usage_stats]
     chart_data = [s.get("total_calls", 0) for s in usage_stats]
-    today_visits, total_visits = database.get_visit_stats()
     return {
         "userStats": user_stats,
         "totalCalls": total_calls,
         "chartLabels": chart_labels,
-        "chartData": chart_data,
-        "todayVisits": today_visits,
-        "totalVisits": total_visits
+        "chartData": chart_data
     }
 
 

@@ -1,5 +1,5 @@
 # main.py
-# 征信报告分析系统 - 主入口（模块化版本 v051514 无支付）
+# 征信报告分析系统 - 主入口（完全免费版）
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,7 +24,6 @@ app.include_router(admin_router)
 # 前端页面
 @app.get("/")
 async def frontend():
-    database.record_visit()
     return HTMLResponse(content='''
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -51,8 +50,6 @@ async def frontend():
         button{background:#4a90e2;color:#fff;border:none;padding:14px 28px;border-radius:40px;font-size:16px;font-weight:500;cursor:pointer;width:100%;margin-top:8px}
         button:hover{background:#357abd}
         button:disabled{background:#ccc;cursor:not-allowed}
-        .btn-recharge{background:#28a745}
-        .btn-recharge:hover{background:#218838}
         .loading{display:none;text-align:center;margin:24px 0;color:#4a90e2}
         .result-container{display:none;margin-top:24px}
         .result-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
@@ -66,11 +63,11 @@ async def frontend():
 <body>
 <div class="container">
     <h1>📄 征信结构解读</h1>
-    <p class="desc">请上传个人<strong>简版</strong>信用报告（PDF），首次使用需支付19.9元/次</p>
+    <p class="desc">请上传个人<strong>简版</strong>信用报告（PDF），免费分析</p>
     
     <div class="auth-box">
-        <input type="tel" id="phone" placeholder="手机号（已付费用户必填）" autocomplete="off">
-        <input type="text" id="apiKey" placeholder="API Key（已付费用户必填）" autocomplete="off">
+        <input type="tel" id="phone" placeholder="手机号" autocomplete="off">
+        <input type="text" id="apiKey" placeholder="API Key" autocomplete="off">
         <div class="remember-row">
             <label>
                 <input type="checkbox" id="rememberMe"> 记住我
@@ -91,10 +88,7 @@ async def frontend():
         <div class="progress-text" id="progressText">准备上传...</div>
     </div>
     
-    <div class="button-group">
-        <button id="analyzeBtn" disabled>开始分析</button>
-        <button id="rechargeBtn" class="btn-recharge">💰 充值</button>
-    </div>
+    <button id="analyzeBtn" disabled>开始分析</button>
     
     <div class="loading" id="loading">正在为您分析，请稍候...</div>
     <div class="result-container" id="resultContainer">
@@ -105,8 +99,7 @@ async def frontend():
         <div class="result" id="result"></div>
     </div>
     <div class="info-note">
-        💡 提示：<br>
-        API Key获取请联系管理员（微信:DXNBZ579）
+        📱 遇到问题请联系管理员（微信:DXNBZ579）
     </div>
 </div>
 <div id="copySuccess" class="copy-success">✅ 已复制到剪贴板</div>
@@ -115,7 +108,6 @@ async def frontend():
     const uploadArea = document.getElementById('uploadArea');
     const fileInput = document.getElementById('fileInput');
     const analyzeBtn = document.getElementById('analyzeBtn');
-    const rechargeBtn = document.getElementById('rechargeBtn');
     const loadingDiv = document.getElementById('loading');
     const resultDiv = document.getElementById('result');
     const resultContainer = document.getElementById('resultContainer');
@@ -132,13 +124,6 @@ async def frontend():
     
     let selectedFile = null;
     let currentReport = '';
-    
-    // 充值按钮跳转
-    if (rechargeBtn) {
-        rechargeBtn.onclick = () => {
-            window.location.href = '/recharge';
-        };
-    }
     
     function checkAuth() {
         analyzeBtn.disabled = !(selectedFile && phoneInput.value.trim() && apiKeyInput.value.trim());
